@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from typing import List
+from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import redis.asyncio as redis
 
@@ -9,6 +10,10 @@ app = FastAPI(
     title="Roisbet Display Service",
     root_path=os.getenv("ROOT_PATH", "")
 )
+
+@app.get("/status", tags=["Health"])
+async def health_check():
+    return {"status": "ok", "service": "display-service", "timestamp": str(datetime.now())}
 
 redis_client = None
 

@@ -54,7 +54,7 @@ resource "aws_lb_target_group" "web" {
   target_type = "ip" # Indispensable pour Fargate
 
   health_check {
-    path                = "/"
+    path                = "/status"
     healthy_threshold   = 2
     unhealthy_threshold = 10
     timeout             = 5
@@ -85,7 +85,7 @@ resource "aws_lb_target_group" "backends" {
   vpc_id      = aws_vpc.main.id 
 
   health_check {
-    path                = "/" # À ajuster selon le endpoint de health check de tes services
+    path                = "/status"
     interval            = 30
     timeout             = 5
     healthy_threshold   = 2
@@ -97,6 +97,7 @@ resource "aws_lb_target_group" "backends" {
 resource "aws_lb_listener_rule" "backends" {
   for_each     = local.microservices
   listener_arn = aws_lb_listener.http.arn 
+  priority     = 10 + index(keys(local.microservices), each.key)
 
   action {
     type             = "forward"

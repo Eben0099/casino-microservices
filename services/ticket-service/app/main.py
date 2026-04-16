@@ -24,6 +24,10 @@ app = FastAPI(
     root_path=os.getenv("ROOT_PATH", "")
 )
 
+@app.get("/status", tags=["Health"])
+async def health_check():
+    return {"status": "ok", "service": "ticket-service", "timestamp": str(datetime.now())}
+
 redis_client = None
 
 @app.on_event("startup")

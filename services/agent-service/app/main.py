@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import bcrypt
 import os
+from datetime import datetime
 from uuid import UUID
 
 from .database import get_db
@@ -36,9 +37,9 @@ async def get_agent_stats(db: AsyncSession = Depends(get_db)):
         "active_agents": count_agents
     }
 
-@app.get("/health")
+@app.get("/status", tags=["Health"])
 async def health_check():
-    return {"status": "ok", "service": "agent-service"}
+    return {"status": "ok", "service": "agent-service", "timestamp": str(datetime.now())}
 
 # ---------------------------------------------------------
 # ROUTE 0 : CRÉER UN AGENT (Register via Admin API Key)

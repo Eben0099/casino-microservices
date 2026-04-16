@@ -44,14 +44,20 @@ jobs:
         for service in "${services[@]}"; do
           echo "🏁 Traitement du service : $service"
           
-          # Correction du nom du dépôt pour le service roulette (qui s'appelle casino-game-roulette-service)
+          # Correction du nom du dépôt
           repo_name="casino-$service"
           
-          # Build pour ARM64 (Compatible avec ton Mac M2 et tes serveurs Fargate optimisés)
           docker buildx build --platform linux/arm64 \
             -t ${{ env.ECR_REGISTRY }}/$repo_name:latest \
             ./services/$service --push
             
-          # Signal à ECS pour redémarrer le service avec la nouvelle image
           aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service $repo_name-service --force-new-deployment
         done
+
+        # --- DÉPLOIEMENT DU BACKOFFICE ---
+        echo "🌐 Traitement du service : backoffice"
+        docker buildx build --platform linux/arm64 \
+          -t ${{ env.ECR_REGISTRY }}/casino-backoffice-web:latest \
+          ./services/backoffice --push
+          
+        aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service casino-web-service --force-new-deployment
