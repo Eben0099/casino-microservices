@@ -10,9 +10,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copier le reste du code
 COPY ./app ./app
+COPY ./entrypoint.sh ./entrypoint.sh
+COPY ./alembic ./alembic
+COPY ./alembic.ini ./alembic.ini
+
+# Rendre le script exécutable
+RUN chmod +x ./entrypoint.sh
 
 # Exposer le port interne du conteneur
 EXPOSE 8000
 
-# Lancer Uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Utiliser le script d'entrée pour lancer les migrations et le serveur
+ENTRYPOINT ["./entrypoint.sh"]
