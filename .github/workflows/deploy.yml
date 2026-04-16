@@ -1,0 +1,57 @@
+name: Déploiement Casino Microservices
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: "eu-west-3"
+  ECR_REGISTRY: "253571482846.dkr.ecr.eu-west-3.amazonaws.com"
+  CLUSTER_NAME: "casino-cluster"
+
+jobs:
+  build-and-deploy:
+    name: 🚀 Build et Déploiement
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Récupération du code
+      uses: actions/checkout@v4
+
+    - name: 🔐 Connexion à AWS
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: 🐳 Connexion à Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: 🏗️ Setup Docker Buildx (pour build ARM64)
+      uses: docker/setup-buildx-action@v3
+
+    - name: 📋 Installation de QEMU (pour l'émulation ARM64)
+      uses: docker/setup-qemu-action@v3
+
+    - name: 🛠️ Build, Tag, et Push des images (ARM64)
+      run: |
+        # Liste des services à traiter
+        services=("agent-service" "display-service" "game-roulette-service" "ticket-service")
+
+        for service in "${services[@]}"; do
+          echo "🏁 Traitement du service : $service"
+          
+          # Correction du nom du dépôt pour le service roulette (qui s'appelle casino-game-roulette-service)
+          repo_name="casino-$service"
+          
+          # Build pour ARM64 (Compatible avec ton Mac M2 et tes serveurs Fargate optimisés)
+          docker buildx build --platform linux/arm64 \
+            -t ${{ env.ECR_REGISTRY }}/$repo_name:latest \
+            ./services/$service --push
+            
+          # Signal à ECS pour redémarrer le service avec la nouvelle image
+          aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service $repo_name-service --force-new-deployment
+        done

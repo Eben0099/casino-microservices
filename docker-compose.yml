@@ -1,0 +1,170 @@
+
+services:
+  # --------------------------------------------------------
+  # 1. L'API Gateway : Traefik
+  # --------------------------------------------------------
+  traefik:
+    image: traefik:v2.10
+    container_name: casino_gateway
+    command:
+      # Active l'écoute de Docker (Traefik va scanner les autres conteneurs)
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      # Ne pas exposer par défaut tous les conteneurs (seulement ceux qu'on choisit)
+      - "--providers.docker.exposedbydefault=false"
+      # Point d'entrée pour le web (Port 80)
+      - "--entrypoints.web.address=:80"
+      # Active le dashboard de Traefik (très utile pour débugger)
+      - "--api.insecure=true"
+      # Provider fichier (pour quand le provider docker fait des siennes)
+      - "--providers.file.filename=/etc/traefik/dynamic_conf.yml"
+      - "--providers.file.watch=true"
+    user: root
+    ports:
+      - "80:80"       # Le port HTTP principal de ton backend
+      - "8080:8080"   # Le dashboard d'administration de Traefik
+    volumes:
+      # Permet à Traefik de discuter avec Docker pour découvrir les services
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./traefik/dynamic_conf.yml:/etc/traefik/dynamic_conf.yml:ro"
+    networks:
+      - casino_network
+
+  # --------------------------------------------------------
+  # 2. La Base de Données : PostgreSQL 16
+  # --------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: casino_db
+    environment:
+      POSTGRES_USER: casino_admin
+      POSTGRES_PASSWORD: super_secret_password
+      # Base de données par défaut (on en créera d'autres plus tard)
+      POSTGRES_DB: casino_agent_db 
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - casino_network
+
+  # --------------------------------------------------------
+  # 3. Le Cache & Message Broker : Redis 7
+  # --------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: casino_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - casino_network
+
+  # --------------------------------------------------------
+  # 4. Le Microservice Agent (Anciennement Wallet)
+  # --------------------------------------------------------
+  agent-service:
+    build: 
+      context: ./services/agent-service
+    container_name: casino_agent_api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - casino_network
+    environment:
+      - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
+      - ADMIN_API_KEY=CleSuperSecreteBackoffice2026
+    volumes:
+      - ./services/agent-service:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.agent.entrypoints=web"
+      # LA CORRECTION EST ICI : On ajoute /docs et /openapi.json pour FastAPI
+      - "traefik.http.routers.agent.rule=PathPrefix(`/api/agents`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || Path(`/health`)"
+      - "traefik.http.services.agent.loadbalancer.server.port=8000"
+
+  # --------------------------------------------------------
+  # 5. Le Microservice Ticket
+  # --------------------------------------------------------
+  ticket-service:
+    build: 
+      context: ./services/ticket-service
+    container_name: casino_ticket_api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - casino_network
+    environment:
+      - REDIS_URL=redis://casino_redis:6379/0
+      - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
+    volumes:
+      - ./services/ticket-service:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ticket.entrypoints=web"
+      - "traefik.http.routers.ticket.rule=PathPrefix(`/api/tickets`) || PathPrefix(`/docs-ticket`) || PathPrefix(`/openapi-ticket.json`) || Path(`/health-ticket`)"
+      - "traefik.http.services.ticket.loadbalancer.server.port=8000"
+
+  # --------------------------------------------------------
+  # 6. Moteur de Roulette (State Machine + Redis)
+  # --------------------------------------------------------
+  game-roulette-service:
+    build: 
+      context: ./services/game-roulette-service
+    container_name: casino_roulette_engine
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - casino_network
+    environment:
+      - REDIS_URL=redis://casino_redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://casino_admin:super_secret_password@postgres:5432/casino_roulette_db
+    volumes:
+      - ./services/game-roulette-service:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.roulette.entrypoints=web"
+      - "traefik.http.routers.roulette.rule=PathPrefix(`/api/roulette`)"
+      - "traefik.http.services.roulette.loadbalancer.server.port=8000"
+
+  # --------------------------------------------------------
+  # 7. Relais Temps Réel : Display Service (WebSocket)
+  # --------------------------------------------------------
+  display-service:
+    build: 
+      context: ./services/display-service
+    container_name: casino_display_api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - casino_network
+    environment:
+      - REDIS_URL=redis://casino_redis:6379/0
+    volumes:
+      - ./services/display-service:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.display.entrypoints=web"
+      - "traefik.http.routers.display.rule=PathPrefix(`/api/display`) || PathPrefix(`/ws/display`)"
+      - "traefik.http.services.display.loadbalancer.server.port=8000"
+
+  # --------------------------------------------------------
+  # 8. Interface d'Administration : Backoffice (React)
+  # --------------------------------------------------------
+  backoffice-web:
+    build: 
+      context: ./services/backoffice
+    container_name: casino_backoffice
+    networks:
+      - casino_network
+    volumes:
+      - ./services/backoffice:/app
+      - /app/node_modules
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backoffice.entrypoints=web"
+      - "traefik.http.routers.backoffice.rule=PathPrefix(`/`)"
+      - "traefik.http.services.backoffice.loadbalancer.server.port=5173"
+
+networks:
+  casino_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+

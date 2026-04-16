@@ -1,0 +1,59 @@
+http:
+  routers:
+    agent-router:
+      rule: "PathPrefix(`/api/agents`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || Path(`/health`)"
+      service: agent-service
+      entryPoints:
+        - web
+
+    ticket-router:
+      rule: "PathPrefix(`/api/tickets`) || PathPrefix(`/docs-ticket`) || PathPrefix(`/openapi-ticket.json`) || Path(`/health-ticket`)"
+      service: ticket-service
+      entryPoints:
+        - web
+
+    roulette-router:
+      rule: "PathPrefix(`/api/roulette`)"
+      service: roulette-service
+      entryPoints:
+        - web
+
+    display-router:
+      rule: "PathPrefix(`/api/display`) || PathPrefix(`/ws/display`)"
+      service: display-service
+      entryPoints:
+        - web
+
+    # Catch-all pour le frontend
+    backoffice-router:
+      rule: "PathPrefix(`/`)"
+      service: backoffice-service
+      priority: 1
+      entryPoints:
+        - web
+
+  services:
+    agent-service:
+      loadBalancer:
+        servers:
+          - url: "http://casino_agent_api:8000"
+
+    ticket-service:
+      loadBalancer:
+        servers:
+          - url: "http://casino_ticket_api:8000"
+
+    roulette-service:
+      loadBalancer:
+        servers:
+          - url: "http://casino_roulette_engine:8000"
+
+    display-service:
+      loadBalancer:
+        servers:
+          - url: "http://casino_display_api:8000"
+
+    backoffice-service:
+      loadBalancer:
+        servers:
+          - url: "http://casino_backoffice:5173"
