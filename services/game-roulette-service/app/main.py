@@ -4,38 +4,82 @@ import os
 import hashlib
 import hmac
 import secrets
+import time
 from datetime import datetime
 import redis.asyncio as redis
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends
+from sqlalchemy import select
 
-# --- NOUVEAUX IMPORTS ---
 from .database import engine, Base, SessionLocal
 from .models import RouletteRound
+from .rules import get_number_properties, calculate_stats
 
 app = FastAPI(
     title="Roisbet Roulette Engine",
     root_path=os.getenv("ROOT_PATH", "")
 )
 
-# Configuration des temps (en secondes)
-TIME_BETTING = 45
-TIME_SPINNING = 15
-TIME_RESULT = 10
+# Configuration des temps (en secondes) définis par le protocole
+TIME_BETTING = 30.0
+TIME_BETS_CLOSING = 5.0
+TIME_SPINNING = 12.0
+TIME_RESULT = 5.0
 
 redis_client = None
+
+# État global du jeu pour les nouveaux arrivants (welcome)
+current_game_state = {
+    "round_id": "",
+    "phase": "Betting",
+    "started_at": 0.0,
+    "duration": TIME_BETTING,
+    "result": None
+}
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        await self.send_welcome(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections.copy():
+            try:
+                await connection.send_json(message)
+            except Exception:
+                self.disconnect(connection)
+
+    async def send_welcome(self, websocket: WebSocket):
+        # Envoie l'état instantané du jeu
+        welcome_msg = {
+            "type": "welcome",
+            "serverTime": time.time(),
+            "currentGameId": current_game_state["round_id"],
+            "currentPhase": current_game_state["phase"],
+            "phaseStartedAt": current_game_state["started_at"],
+            "phaseDuration": current_game_state["duration"],
+            "result": current_game_state["result"]
+        }
+        await websocket.send_json(welcome_msg)
+
+manager = ConnectionManager()
 
 @app.on_event("startup")
 async def startup_event():
     global redis_client
-    # Connexion à Redis au démarrage du service
     redis_url = os.getenv("REDIS_URL", "redis://casino_redis:6379/0")
     redis_client = redis.from_url(redis_url, decode_responses=True)
     
-    # Création automatique de la table d'audit si elle n'existe pas
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         
-    # On lance la boucle de jeu en arrière-plan !
     asyncio.create_task(game_loop())
 
 @app.on_event("shutdown")
@@ -43,135 +87,175 @@ async def shutdown_event():
     if redis_client:
         await redis_client.close()
 
-# --- PROVABLY FAIR LOGIC ---
-
 def generate_provably_fair_result(server_seed: str, nonce: str) -> str:
-    """Calcule le résultat de la roulette de manière cryptographique et déterministe"""
-    # On crée une empreinte HMAC combinant le secret et le numéro du round (nonce)
     hmac_obj = hmac.new(
         key=server_seed.encode('utf-8'),
         msg=nonce.encode('utf-8'),
         digestmod=hashlib.sha256
     )
     hash_hex = hmac_obj.hexdigest()
-    
-    # On prend les 8 premiers caractères du hash, on les convertit en nombre, et on fait modulo 37 (pour avoir 0-36)
     decimal_value = int(hash_hex[:8], 16)
-    winning_number = decimal_value % 37
-    return str(winning_number)
+    return str(decimal_value % 37)
 
-# --- LA MACHINE À ÉTATS ---
+async def set_game_phase(phase: str, duration: float, round_id: str, result=None):
+    current_game_state.update({
+        "round_id": round_id,
+        "phase": phase,
+        "started_at": time.time(),
+        "duration": duration,
+        "result": result
+    })
+    
+    await manager.broadcast({
+        "type": "phase_changed",
+        "serverTime": time.time(),
+        "gameId": round_id,
+        "phase": phase,
+        "duration": duration
+    })
+    
+    # Optional fallback for other microservices via Redis
+    if redis_client:
+        await redis_client.set("roulette:current_state", json.dumps(current_game_state))
+        await redis_client.publish("roulette-events", json.dumps({
+            "type": "phase_changed",
+            "serverTime": time.time(),
+            "gameId": round_id,
+            "phase": phase,
+            "duration": duration
+        }))
 
 async def game_loop():
-    print("🎰 Moteur de Roulette (Provably Fair) démarré !")
+    print("🎰 Moteur de Roulette (Provably Fair) + WebSockets Unity démarré !")
     
+    # On charge l'historique existant en base si disponible
+    history_numbers = []
+    try:
+        if redis_client:
+            redis_hist = await redis_client.lrange("roulette:history", 0, 199)
+            if redis_hist:
+                history_numbers = [int(x) for x in reversed(redis_hist)]
+    except Exception:
+        pass
+
     while True:
         try:
-            round_id = f"ROUND-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            round_id = f"ROUND-{int(time.time())}"
             
             # --- GÉNÉRATION CRYPTOGRAPHIQUE ---
-            # 1. On crée un secret absolu pour ce tour
             server_seed = secrets.token_hex(16) 
-            # 2. On crée le "coffre-fort" (le hash public)
             server_seed_hash = hashlib.sha256(server_seed.encode('utf-8')).hexdigest()
-            # 3. On calcule DEJA le résultat (mais on le garde pour nous)
-            winning_number = generate_provably_fair_result(server_seed, round_id)
+            winning_number_str = generate_provably_fair_result(server_seed, round_id)
+            winning_number = int(winning_number_str)
+            result_payload = get_number_properties(winning_number)
             
             # ==========================================
             # ÉTAT 1 : BETTING
             # ==========================================
-            print(f"🟢 [BETTING] {round_id} - Hash Public: {server_seed_hash[:16]}...")
-            
-            await redis_client.set("roulette:current_state", json.dumps({
-                "round_id": round_id,
-                "status": "BETTING",
-                "time_left": TIME_BETTING,
-                "server_seed_hash": server_seed_hash # On publie le hash pour la TV !
-            }))
-            
-            await redis_client.publish("roulette-events", json.dumps({
-                "event": "STATE_CHANGE",
-                "round_id": round_id,
-                "status": "BETTING",
-                "duration": TIME_BETTING,
-                "server_seed_hash": server_seed_hash
-            }))
-            
+            print(f"🟢 [BETTING] {round_id}")
+            await set_game_phase("Betting", TIME_BETTING, round_id)
             await asyncio.sleep(TIME_BETTING)
 
             # ==========================================
-            # ÉTAT 2 : SPINNING
+            # ÉTAT 2 : BETS CLOSING
             # ==========================================
-            print(f"🟡 [SPINNING] {round_id} - Rien ne va plus ! Cible: {winning_number}")
-            
-            await redis_client.set("roulette:current_state", json.dumps({
-                "round_id": round_id,
-                "status": "SPINNING",
-                "time_left": TIME_SPINNING
-            }))
-            
-            await redis_client.publish("roulette-events", json.dumps({
-                "event": "STATE_CHANGE",
-                "round_id": round_id,
-                "status": "SPINNING",
-                "duration": TIME_SPINNING,
-                "target_number": winning_number 
-            }))
-            
-            await asyncio.sleep(TIME_SPINNING)
+            print(f"🟠 [BETS CLOSING] {round_id}")
+            await set_game_phase("BetsClosing", TIME_BETS_CLOSING, round_id)
+            await asyncio.sleep(TIME_BETS_CLOSING)
 
             # ==========================================
-            # ÉTAT 3 : RESULT
+            # ÉTAT 3 : SPINNING
             # ==========================================
-            print(f"🔴 [RESULT] {round_id} - Gagnant: {winning_number} | Secret révélé: {server_seed}")
+            print(f"🟡 [SPINNING] {round_id} - Target: {winning_number}")
+            await set_game_phase("Spinning", TIME_SPINNING, round_id, result_payload)
             
-            await redis_client.set("roulette:current_state", json.dumps({
-                "round_id": round_id,
-                "status": "RESULT",
-                "winning_number": winning_number,
-                "server_seed": server_seed, # On révèle le secret !
-                "time_left": TIME_RESULT
-            }))
+            # On envoie result_revealed AVANT la fin du spin (e.g. 11s)
+            delay_before_reveal = TIME_SPINNING - 1.0
+            await asyncio.sleep(delay_before_reveal)
             
-            await redis_client.lpush("roulette:history", winning_number)
-            await redis_client.ltrim("roulette:history", 0, 49)
+            # --- RESULT_REVEALED ---
+            result_revealed_payload = {
+                "type": "result_revealed",
+                "serverTime": time.time(),
+                "gameId": round_id,
+                "result": result_payload
+            }
+            await manager.broadcast(result_revealed_payload)
+            if redis_client:
+                await redis_client.publish("roulette-events", json.dumps(result_revealed_payload))
             
-            await redis_client.publish("roulette-events", json.dumps({
-                "event": "ROUND_FINISHED",
-                "round_id": round_id,
-                "winning_number": winning_number,
-                "server_seed": server_seed # La TV peut afficher le secret à l'écran pour les joueurs paranos
-            }))
+            await asyncio.sleep(1.0) # Fin de la phase Spinning
             
-            # --- NOUVEAU : SAUVEGARDE EN BASE DE DONNÉES ---
+            # Update history and calculate stats
+            history_numbers.append(winning_number)
+            if len(history_numbers) > 200:
+                history_numbers.pop(0)
+            
+            if redis_client:
+                await redis_client.lpush("roulette:history", str(winning_number))
+                await redis_client.ltrim("roulette:history", 0, 199)
+                
+            stats_payload = calculate_stats(history_numbers)
+            
+            # --- STATS_UPDATED ---
+            stats_updated_payload = {
+                "type": "stats_updated",
+                "serverTime": time.time(),
+                "gameId": round_id,
+                "stats": stats_payload
+            }
+            await manager.broadcast(stats_updated_payload)
+            if redis_client:
+                await redis_client.publish("roulette-events", json.dumps(stats_updated_payload))
+
+            # ==========================================
+            # ÉTAT 4 : RESULT
+            # ==========================================
+            print(f"🔴 [RESULT] {round_id} - Gagnant: {winning_number}")
+            await set_game_phase("Result", TIME_RESULT, round_id, result_payload)
+            
+            # Sauvegarde en base de données
             async with SessionLocal() as db:
                 new_round = RouletteRound(
                     round_id=round_id,
-                    winning_number=winning_number,
+                    winning_number=str(winning_number),
                     server_seed=server_seed,
                     server_seed_hash=server_seed_hash
                 )
                 db.add(new_round)
                 await db.commit()
-                print(f"💾 [AUDIT] Round {round_id} sauvegardé en base de données.")
 
             await asyncio.sleep(TIME_RESULT)
             
         except Exception as e:
             print(f"Erreur critique dans la boucle de jeu: {e}")
-            await asyncio.sleep(5) # Pause avant de retenter pour éviter de spammer les logs en cas de crash
+            await asyncio.sleep(5)
 
-# Une petite route pour vérifier que le service tourne
+@app.websocket("/ws/roulette")
+@app.websocket("/api/display/ws/roulette")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                payload = json.loads(data)
+                if payload.get("type") == "ping":
+                    await websocket.send_json({
+                        "type": "pong",
+                        "clientTime": payload.get("clientTime"),
+                        "serverTime": time.time()
+                    })
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+# --- ROUTES CLASSIQUES ---
+
 @app.get("/status")
 async def get_status():
-    if not redis_client:
-        return {"status": "starting"}
-    current_state = await redis_client.get("roulette:current_state")
-    return json.loads(current_state) if current_state else {"status": "unknown"}
-
-# --- ROUTE ADMIN: HISTORIQUE ---
-from fastapi import Header, HTTPException, Depends
-from sqlalchemy import select
+    return current_game_state
 
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
 

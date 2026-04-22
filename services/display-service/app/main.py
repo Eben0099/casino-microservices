@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 from typing import List
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -74,6 +75,7 @@ async def shutdown_event():
 # --- ROUTES DE L'API ---
 
 @app.websocket("/ws/roulette")
+@app.websocket("/api/display/ws/roulette")
 async def websocket_endpoint(websocket: WebSocket):
     """C'est ici que le frontend Unity ou Web va se connecter"""
     await manager.connect(websocket)
@@ -81,13 +83,36 @@ async def websocket_endpoint(websocket: WebSocket):
     # Au moment exact de la connexion, on envoie l'état actuel pour que la TV ne soit pas perdue
     current_state = await redis_client.get("roulette:current_state")
     if current_state:
-        await websocket.send_text(current_state)
+        try:
+            state_dict = json.loads(current_state)
+            welcome_msg = {
+                "type": "welcome",
+                "serverTime": time.time(),
+                "currentGameId": state_dict.get("round_id", ""),
+                "currentPhase": state_dict.get("phase", "Betting"),
+                "phaseStartedAt": state_dict.get("started_at", 0.0),
+                "phaseDuration": state_dict.get("duration", 30.0),
+                "result": state_dict.get("result", None)
+            }
+            await websocket.send_text(json.dumps(welcome_msg))
+        except Exception as e:
+            print(f"Error parsing current state: {e}")
 
     try:
         # Boucle infinie pour garder la connexion WebSocket ouverte
         while True:
-            # On ne s'attend pas à ce que la TV parle, mais on doit "écouter" pour détecter si elle se déconnecte
-            await websocket.receive_text()
+            # On écoute les pings du client pour y répondre par un pong
+            data = await websocket.receive_text()
+            try:
+                payload = json.loads(data)
+                if payload.get("type") == "ping":
+                    await websocket.send_text(json.dumps({
+                        "type": "pong",
+                        "clientTime": payload.get("clientTime"),
+                        "serverTime": time.time()
+                    }))
+            except json.JSONDecodeError:
+                pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
