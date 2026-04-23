@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, UUID4
 from typing import Optional
-from .models import AgentRole
+from .models import AgentRole, CashTxType
 from uuid import UUID
 
 class AgentCreate(BaseModel):
@@ -33,9 +33,10 @@ class AgentListResponse(BaseModel):
     total: int
 
 class ProvisionRequest(BaseModel):
-    amount: int = Field(..., gt=0, description="Montant en XAF (strictement positif)")
-    description: Optional[str] = "Approvisionnement initial"
+    amount: int = Field(..., description="Montant en XAF (peut être négatif pour un retrait/paiement)")
+    description: Optional[str] = "Transaction de caisse"
+    tx_type: Optional[CashTxType] = None
 
 class LoginRequest(BaseModel):
-    agent_id: str
+    phone: str
     password: str

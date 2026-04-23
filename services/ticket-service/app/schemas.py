@@ -18,6 +18,8 @@ class TicketBetResponse(BaseModel):
     bet_type: str
     bet_target: Optional[str]
     amount: int
+    is_winning: bool = False
+    payout: int = 0
     
     class Config:
         from_attributes = True
@@ -30,6 +32,8 @@ class TicketResponse(BaseModel):
     round_id: str
     status: TicketStatus
     total_wager: int
+    total_payout: int
+    winning_number: Optional[str] = None
     created_at: datetime
     bets: List[TicketBetResponse]
     

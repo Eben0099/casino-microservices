@@ -41,8 +41,8 @@ services:
       POSTGRES_PASSWORD: super_secret_password
       # Base de données par défaut (on en créera d'autres plus tard)
       POSTGRES_DB: casino_agent_db 
-    ports:
-      - "5432:5432"
+    # ports:
+    #   - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -54,8 +54,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: casino_redis
-    ports:
-      - "6379:6379"
+    # ports:
+    #   - "6379:6379"
     networks:
       - casino_network
 
@@ -72,14 +72,15 @@ services:
     environment:
       - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
       - ADMIN_API_KEY=CleSuperSecreteBackoffice2026
+      - ROOT_PATH=/api/agents
     volumes:
       - ./services/agent-service:/app
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.agent.entrypoints=web"
-      # LA CORRECTION EST ICI : On ajoute /docs et /openapi.json pour FastAPI
-      - "traefik.http.routers.agent.rule=PathPrefix(`/api/agents`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || Path(`/health`)"
+      - "traefik.http.routers.agent.rule=PathPrefix(`/api/agents`)"
       - "traefik.http.services.agent.loadbalancer.server.port=8000"
+      - "traefik.http.routers.agent.priority=100"
 
   # --------------------------------------------------------
   # 5. Le Microservice Ticket
@@ -94,13 +95,15 @@ services:
     environment:
       - REDIS_URL=redis://casino_redis:6379/0
       - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
+      - ROOT_PATH=/api/tickets
     volumes:
       - ./services/ticket-service:/app
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ticket.entrypoints=web"
-      - "traefik.http.routers.ticket.rule=PathPrefix(`/api/tickets`) || PathPrefix(`/docs-ticket`) || PathPrefix(`/openapi-ticket.json`) || Path(`/health-ticket`)"
+      - "traefik.http.routers.ticket.rule=PathPrefix(`/api/tickets`)"
       - "traefik.http.services.ticket.loadbalancer.server.port=8000"
+      - "traefik.http.routers.ticket.priority=100"
 
   # --------------------------------------------------------
   # 6. Moteur de Roulette (State Machine + Redis)
@@ -160,6 +163,27 @@ services:
       - "traefik.http.routers.backoffice.entrypoints=web"
       - "traefik.http.routers.backoffice.rule=PathPrefix(`/`)"
       - "traefik.http.services.backoffice.loadbalancer.server.port=5173"
+      - "traefik.http.routers.backoffice.priority=1"
+
+  # --------------------------------------------------------
+  # 9. Interface Agent : Point de Vente (React)
+  # --------------------------------------------------------
+  agent-web:
+    build: 
+      context: ./services/agent-web
+    container_name: casino_agent_web
+    networks:
+      - casino_network
+    volumes:
+      - ./services/agent-web:/app
+      - /app/node_modules
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.agent-web.entrypoints=web"
+      - "traefik.http.routers.agent-web.rule=PathPrefix(`/agents/pos`)"
+      - "traefik.http.services.agent-web.loadbalancer.server.port=5173"
+      - "traefik.http.routers.agent-web.priority=10"
+
 
 networks:
   casino_network:

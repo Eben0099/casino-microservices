@@ -135,14 +135,24 @@ async def provision_cash(agent_id: UUID, req: ProvisionRequest, db: AsyncSession
         
     balance_before = caisse.balance
     
-    # 2. Mettre à jour le solde
+    # 2. Déterminer le type de transaction intelligemment si non fourni
+    tx_type = req.tx_type
+    if not tx_type:
+        if req.amount < 0:
+            tx_type = CashTxType.PAYOUT
+        elif "Vente" in (req.description or ""):
+            tx_type = CashTxType.BET_RECEIVED
+        else:
+            tx_type = CashTxType.PROVISION
+
+    # 3. Mettre à jour le solde
     caisse.balance += req.amount
     
-    # 3. Créer la trace d'audit (Transaction)
+    # 4. Créer la trace d'audit (Transaction)
     transaction = CashRegisterTransaction(
         cash_register_id=caisse.id,
         agent_id=agent_id,
-        tx_type=CashTxType.PROVISION,
+        tx_type=tx_type,
         amount=req.amount,
         balance_before=balance_before,
         balance_after=caisse.balance,
@@ -217,19 +227,14 @@ async def update_agent(agent_id: UUID, update_data: AgentUpdate, db: AsyncSessio
 
 @app.post("/login")
 async def login_agent(request: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Route pour connecter un caissier et lui donner son passeport JWT"""
+    """Route pour connecter un caissier via son numéro de téléphone"""
     
-    # 1. On vérifie que cet agent existe bien dans la base de données
-    try:
-        agent_id_uuid = UUID(request.agent_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="ID d'agent invalide (doit être un UUID)")
-
-    result = await db.execute(select(Agent).where(Agent.id == agent_id_uuid))
+    # 1. On vérifie que cet agent existe bien dans la base de données via son téléphone
+    result = await db.execute(select(Agent).where(Agent.phone == request.phone))
     agent = result.scalars().first()
     
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent introuvable")
+        raise HTTPException(status_code=404, detail="Agent introuvable avec ce numéro de téléphone.")
         
     # 1.5 Vérification du mot de passe
     password_bytes = request.password.encode('utf-8')
@@ -248,5 +253,6 @@ async def login_agent(request: LoginRequest, db: AsyncSession = Depends(get_db))
     return {
         "access_token": access_token, 
         "token_type": "bearer",
+        "agent_id": str(agent.id),
         "agent_name": agent.display_name 
     }

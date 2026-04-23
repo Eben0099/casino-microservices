@@ -111,7 +111,8 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
         "serverTime": time.time(),
         "gameId": round_id,
         "phase": phase,
-        "duration": duration
+        "duration": duration,
+        "phaseStartedAt": current_game_state["started_at"]
     })
     
     # Optional fallback for other microservices via Redis
@@ -122,7 +123,8 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
             "serverTime": time.time(),
             "gameId": round_id,
             "phase": phase,
-            "duration": duration
+            "duration": duration,
+            "phaseStartedAt": current_game_state["started_at"]
         }))
 
 async def game_loop():
@@ -213,6 +215,14 @@ async def game_loop():
             # ==========================================
             print(f"🔴 [RESULT] {round_id} - Gagnant: {winning_number}")
             await set_game_phase("Result", TIME_RESULT, round_id, result_payload)
+            
+            # --- NOTIFY TICKET SERVICE ---
+            if redis_client:
+                await redis_client.publish("roulette-events", json.dumps({
+                    "event": "ROUND_FINISHED",
+                    "round_id": round_id,
+                    "winning_number": str(winning_number)
+                }))
             
             # Sauvegarde en base de données
             async with SessionLocal() as db:

@@ -80,10 +80,13 @@ async def process_settlement(round_id: str, winning_number: str):
 
         for ticket in tickets_to_process:
             total_payout = 0
+            ticket.winning_number = str(winning_number)
             
             # 2. On calcule le gain de chaque ligne de pari
             for bet in ticket.bets:
                 payout = calculate_payout(bet.bet_type, bet.bet_target, bet.amount, winning_number)
+                bet.payout = payout
+                bet.is_winning = (payout > 0)
                 total_payout += payout
 
             # 3. On détermine le nouveau statut du ticket
@@ -93,7 +96,7 @@ async def process_settlement(round_id: str, winning_number: str):
             ticket.status = new_status
             ticket.total_payout = total_payout
             
-            print(f"   -> Ticket {ticket.short_code} : {new_status.value} | Gain : {total_payout} XAF")
+            print(f"   -> Ticket {ticket.short_code} : {new_status.value} (Gagnant: {winning_number}) | Gain : {total_payout} XAF")
 
         # 5. On sauvegarde tout en une seule transaction
         await db.commit()
@@ -177,7 +180,7 @@ async def create_ticket(
     game_state = json.loads(state_json)
     
     # Règle A : La table doit être en phase BETTING
-    if game_state.get("status") != "BETTING":
+    if game_state.get("phase") != "Betting":
         raise HTTPException(
             status_code=400, 
             detail="Rien ne va plus ! La table est fermée pour ce tour."
@@ -255,3 +258,70 @@ async def create_ticket(
         .where(Ticket.id == new_ticket.id)
     )
     return result.scalars().first()
+
+@app.get("/{short_code}", response_model=TicketResponse)
+async def get_ticket_by_code(
+    short_code: str, 
+    db: AsyncSession = Depends(get_db),
+    agent_id: str = Depends(get_current_agent_id)
+):
+    """Récupère les détails d'un ticket par son code court (ex: TK-2026...)"""
+    result = await db.execute(
+        select(Ticket)
+        .options(selectinload(Ticket.bets))
+        .where(Ticket.short_code == short_code)
+    )
+    ticket = result.scalars().first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable.")
+    return ticket
+
+@app.post("/{short_code}/payout")
+async def payout_ticket(
+    short_code: str, 
+    db: AsyncSession = Depends(get_db),
+    agent_id: str = Depends(get_current_agent_id)
+):
+    """Marque un ticket comme payé et débite la caisse de l'agent"""
+    # 1. Récupérer le ticket
+    result = await db.execute(
+        select(Ticket)
+        .where(Ticket.short_code == short_code)
+    )
+    ticket = result.scalars().first()
+    
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable.")
+        
+    # 2. Vérifications de sécurité
+    if ticket.status != TicketStatus.WON:
+        if ticket.status == TicketStatus.PAID:
+            raise HTTPException(status_code=400, detail="Ce ticket a déjà été payé.")
+        raise HTTPException(status_code=400, detail=f"Ce ticket ne peut pas être payé (Statut: {ticket.status})")
+    
+    if ticket.total_payout <= 0:
+        raise HTTPException(status_code=400, detail="Ce ticket n'a aucun gain à payer.")
+
+    # 3. Appeler agent-service pour enregistrer le décaissement
+    # On envoie un montant NÉGATIF pour soustraire de la caisse
+    agent_url = f"http://agent-service:8000/{ticket.agent_id}/provision"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                agent_url,
+                json={
+                    "amount": -ticket.total_payout, # Débit
+                    "description": f"Paiement Gain Ticket {short_code}"
+                },
+                timeout=5.0
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=503, detail="Erreur de communication avec le service de caisse.")
+
+    # 4. Mettre à jour le statut
+    ticket.status = TicketStatus.PAID
+    await db.commit()
+    
+    return {"status": "success", "message": f"Ticket {short_code} payé : {ticket.total_payout} XAF"}
