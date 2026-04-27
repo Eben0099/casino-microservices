@@ -74,7 +74,7 @@ resource "aws_cloudwatch_log_group" "ecs_logs" {
   retention_in_days = 7
 }
 
-# 4. La Recette du Conteneur Web (Task Definition)
+# 4. La Recette du Conteneur Web (Backoffice)
 resource "aws_ecs_task_definition" "web" {
   family                   = "casino-web"
   network_mode             = "awsvpc"
@@ -112,7 +112,7 @@ resource "aws_ecs_task_definition" "web" {
   ])
 }
 
-# 5. Service Web
+# 5. Service Web (Backoffice)
 resource "aws_ecs_service" "web" {
   name            = "casino-web-service"
   cluster         = aws_ecs_cluster.main.id
@@ -129,6 +129,65 @@ resource "aws_ecs_service" "web" {
   load_balancer {
     target_group_arn = aws_lb_target_group.web.arn
     container_name   = "web-container"
+    container_port   = 5173
+  }
+}
+
+# 4bis. La Recette du Conteneur Agent Web
+resource "aws_ecs_task_definition" "agent_web" {
+  family                   = "casino-agent-web"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "agent-web-container"
+      image     = "${aws_ecr_repository.agent_web.repository_url}:latest"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 5173
+          hostPort      = 5173
+          protocol      = "tcp"
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
+          "awslogs-region"        = "eu-west-3"
+          "awslogs-stream-prefix" = "agent-web"
+        }
+      }
+    }
+  ])
+}
+
+# 5bis. Service Agent Web
+resource "aws_ecs_service" "agent_web" {
+  name            = "casino-agent-web-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.agent_web.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = [aws_subnet.public_1.id, aws_subnet.public_2.id]
+    security_groups  = [aws_security_group.ecs_tasks.id]
+    assign_public_ip = true 
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.agent_web.arn
+    container_name   = "agent-web-container"
     container_port   = 5173
   }
 }

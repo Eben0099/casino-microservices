@@ -62,6 +62,23 @@ resource "aws_lb_target_group" "web" {
   }
 }
 
+# 4bis. Le groupe cible (Target Group) pour l'interface Agent Web
+resource "aws_lb_target_group" "agent_web" {
+  name        = "casino-tg-agent-web"
+  port        = 5173 
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/agents/pos"
+    healthy_threshold   = 2
+    unhealthy_threshold = 10
+    timeout             = 5
+    interval            = 10
+  }
+}
+
 # 5. L'écouteur (Listener) principal
 # L'ALB écoute sur le port 80 et envoie tout vers le Backoffice Web par défaut
 resource "aws_lb_listener" "http" {
@@ -72,6 +89,23 @@ resource "aws_lb_listener" "http" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.web.arn
+  }
+}
+
+# 5bis. Règle pour l'interface Agent
+resource "aws_lb_listener_rule" "agent_web" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 5 # Priorité plus haute que le défaut
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.agent_web.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/agents/pos*"]
+    }
   }
 }
 

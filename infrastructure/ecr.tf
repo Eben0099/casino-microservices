@@ -31,9 +31,16 @@ resource "aws_ecr_repository" "display_service" {
   force_delete         = true
 }
 
-# On peut même faire créer le dépôt pour le frontend web si tu veux le déployer en conteneur !
+# 5. Dépôt pour le Backoffice Web
 resource "aws_ecr_repository" "backoffice_web" {
   name                 = "casino-backoffice-web"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# 6. Dépôt pour l'interface Agent (Point de Vente)
+resource "aws_ecr_repository" "agent_web" {
+  name                 = "casino-agent-web"
   image_tag_mutability = "MUTABLE"
   force_delete         = true
 }
