@@ -13,6 +13,7 @@ from sqlalchemy import select
 from .database import engine, SessionLocal
 from .models import RouletteRound
 from .rules import get_number_properties, calculate_stats
+from .settings import load_settings, save_settings, DEFAULT_SETTINGS
 
 app = FastAPI(
     title="AGDTech Roulette Engine",
@@ -141,7 +142,7 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
 
 async def game_loop():
     print("🎰 Moteur de Roulette (Provably Fair) + WebSockets Unity démarré !")
-    
+
     # On charge l'historique existant en base si disponible
     history_numbers = []
     try:
@@ -154,37 +155,51 @@ async def game_loop():
 
     while True:
         try:
+            # Charge les paramètres dynamiques au début de chaque tour
+            settings = await load_settings(redis_client)
+
+            # Mode maintenance : si jeu désactivé, on attend
+            if not settings.get("enabled", True):
+                await set_game_phase("Maintenance", 5.0, "")
+                await asyncio.sleep(5.0)
+                continue
+
+            t_betting = settings["betting_duration"]
+            t_closing = settings["bets_closing_duration"]
+            t_spinning = settings["spinning_duration"]
+            t_result = settings["result_duration"]
+
             round_id = f"ROUND-{int(time.time())}"
-            
+
             # --- GÉNÉRATION CRYPTOGRAPHIQUE ---
-            server_seed = secrets.token_hex(16) 
+            server_seed = secrets.token_hex(16)
             server_seed_hash = hashlib.sha256(server_seed.encode('utf-8')).hexdigest()
             winning_number_str = generate_provably_fair_result(server_seed, round_id)
             winning_number = int(winning_number_str)
             result_payload = get_number_properties(winning_number)
-            
+
             # ==========================================
             # ÉTAT 1 : BETTING
             # ==========================================
-            print(f"🟢 [BETTING] {round_id}")
-            await set_game_phase("Betting", TIME_BETTING, round_id)
-            await asyncio.sleep(TIME_BETTING)
+            print(f"🟢 [BETTING] {round_id} ({t_betting}s)")
+            await set_game_phase("Betting", t_betting, round_id)
+            await asyncio.sleep(t_betting)
 
             # ==========================================
             # ÉTAT 2 : BETS CLOSING
             # ==========================================
             print(f"🟠 [BETS CLOSING] {round_id}")
-            await set_game_phase("BetsClosing", TIME_BETS_CLOSING, round_id)
-            await asyncio.sleep(TIME_BETS_CLOSING)
+            await set_game_phase("BetsClosing", t_closing, round_id)
+            await asyncio.sleep(t_closing)
 
             # ==========================================
             # ÉTAT 3 : SPINNING
             # ==========================================
             print(f"🟡 [SPINNING] {round_id} - Target: {winning_number}")
-            await set_game_phase("Spinning", TIME_SPINNING, round_id, result_payload)
-            
+            await set_game_phase("Spinning", t_spinning, round_id, result_payload)
+
             # On envoie result_revealed AVANT la fin du spin (e.g. 11s)
-            delay_before_reveal = TIME_SPINNING - 1.0
+            delay_before_reveal = max(0.0, t_spinning - 1.0)
             await asyncio.sleep(delay_before_reveal)
             
             # --- RESULT_REVEALED ---
@@ -226,7 +241,7 @@ async def game_loop():
             # ÉTAT 4 : RESULT
             # ==========================================
             print(f"🔴 [RESULT] {round_id} - Gagnant: {winning_number}")
-            await set_game_phase("Result", TIME_RESULT, round_id, result_payload)
+            await set_game_phase("Result", t_result, round_id, result_payload)
             
             # --- NOTIFY TICKET SERVICE ---
             if redis_client:
@@ -247,8 +262,8 @@ async def game_loop():
                 db.add(new_round)
                 await db.commit()
 
-            await asyncio.sleep(TIME_RESULT)
-            
+            await asyncio.sleep(t_result)
+
         except Exception as e:
             print(f"Erreur critique dans la boucle de jeu: {e}")
             await asyncio.sleep(5)
@@ -292,3 +307,26 @@ async def get_roulette_history():
         result = await db.execute(select(RouletteRound).order_by(RouletteRound.created_at.desc()).limit(10))
         rounds = result.scalars().all()
         return rounds
+
+
+@app.get("/admin/settings", dependencies=[Depends(verify_admin_key)])
+async def get_settings():
+    """Renvoie les paramètres dynamiques actuels du moteur."""
+    return await load_settings(redis_client)
+
+
+@app.patch("/admin/settings", dependencies=[Depends(verify_admin_key)])
+async def patch_settings(payload: dict):
+    """Met à jour les paramètres dynamiques. Effet immédiat au prochain cycle."""
+    return await save_settings(redis_client, payload)
+
+
+@app.get("/settings/public")
+async def public_settings():
+    """Endpoint public pour le ticket-service : min_stake, max_stake, enabled."""
+    s = await load_settings(redis_client)
+    return {
+        "min_stake": s["min_stake"],
+        "max_stake": s["max_stake"],
+        "enabled": s["enabled"],
+    }

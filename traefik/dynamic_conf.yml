@@ -14,8 +14,17 @@ http:
       entryPoints:
         - web
 
-    roulette-router:
-      rule: "PathPrefix(`/api/roulette`) || PathPrefix(`/ws/roulette`) || PathPrefix(`/api/display/ws/roulette`)"
+    roulette-api-router:
+      rule: "PathPrefix(`/api/roulette`)"
+      service: roulette-service
+      priority: 100
+      middlewares:
+        - roulette-stripprefix
+      entryPoints:
+        - web
+
+    roulette-ws-router:
+      rule: "PathPrefix(`/ws/roulette`) || PathPrefix(`/api/display/ws/roulette`)"
       service: roulette-service
       priority: 100
       entryPoints:
@@ -48,6 +57,10 @@ http:
       stripPrefix:
         prefixes:
           - "/agents/pos"
+    roulette-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/api/roulette"
 
   services:
     agent-service:

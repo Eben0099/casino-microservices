@@ -131,8 +131,6 @@ services:
       - ./services/game-roulette-service:/app
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.roulette.entrypoints=web"
-      - "traefik.http.routers.roulette.rule=PathPrefix(`/api/roulette`) || PathPrefix(`/ws/roulette`) || PathPrefix(`/api/display/ws/roulette`)"
       - "traefik.http.services.roulette.loadbalancer.server.port=8000"
 
   # --------------------------------------------------------

@@ -202,9 +202,27 @@ async def create_ticket(
     # Règle B : Le pari doit correspondre au round actuel (Anti-décalage)
     if game_state.get("round_id") != ticket_in.round_id:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Round invalide. Le round actuel est {game_state.get('round_id')}."
         )
+
+    # Règle C : Validation min/max mise selon les paramètres dynamiques
+    min_stake = 1
+    max_stake = 10_000_000
+    try:
+        settings_raw = await redis_client.get("roulette:settings")
+        if settings_raw:
+            s = json.loads(settings_raw)
+            min_stake = int(s.get("min_stake", min_stake))
+            max_stake = int(s.get("max_stake", max_stake))
+    except Exception:
+        pass
+
+    for bet in ticket_in.bets:
+        if bet.amount < min_stake:
+            raise HTTPException(status_code=400, detail=f"Mise trop faible. Minimum : {min_stake} XAF.")
+        if bet.amount > max_stake:
+            raise HTTPException(status_code=400, detail=f"Mise trop elevee. Maximum : {max_stake} XAF.")
 
     # 1. Calcul de la mise totale du ticket
     total_wager = sum(bet.amount for bet in ticket_in.bets)
