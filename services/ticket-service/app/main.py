@@ -293,9 +293,61 @@ async def create_ticket(
     )
     return result.scalars().first()
 
+@app.get("/me/recent", response_model=list[TicketResponse])
+async def get_my_recent_tickets(
+    limit: int = 50,
+    minutes: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    agent_id: str = Depends(get_current_agent_id),
+):
+    """Renvoie les tickets recents pour l'agent connecte (auth via JWT)."""
+    from datetime import datetime, timedelta
+    stmt = (
+        select(Ticket)
+        .options(selectinload(Ticket.bets))
+        .where(Ticket.agent_id == agent_id)
+        .order_by(Ticket.created_at.desc())
+        .limit(min(limit, 200))
+    )
+    if minutes is not None and minutes > 0:
+        since = datetime.utcnow() - timedelta(minutes=minutes)
+        stmt = stmt.where(Ticket.created_at >= since)
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@app.get("/me/shift", dependencies=[])
+async def get_my_shift_summary(
+    minutes: int = 720,  # default 12h
+    db: AsyncSession = Depends(get_db),
+    agent_id: str = Depends(get_current_agent_id),
+):
+    """Resume de service: nb tickets, encaissement, paiements, ouverts vs reglés."""
+    from datetime import datetime, timedelta
+    since = datetime.utcnow() - timedelta(minutes=minutes)
+
+    base = select(Ticket).where(Ticket.agent_id == agent_id, Ticket.created_at >= since)
+    rows = (await db.execute(base)).scalars().all()
+    total = len(rows)
+    encaisse = sum((t.total_wager or 0) for t in rows)
+    paye = sum((t.total_payout or 0) for t in rows if t.status == "PAID")
+
+    by_status = {}
+    for t in rows:
+        by_status[t.status] = by_status.get(t.status, 0) + 1
+
+    return {
+        "tickets": total,
+        "total_wager": encaisse,
+        "total_payout": paye,
+        "by_status": by_status,
+        "since_minutes": minutes,
+    }
+
+
 @app.get("/{short_code}", response_model=TicketResponse)
 async def get_ticket_by_code(
-    short_code: str, 
+    short_code: str,
     db: AsyncSession = Depends(get_db),
     agent_id: str = Depends(get_current_agent_id)
 ):
