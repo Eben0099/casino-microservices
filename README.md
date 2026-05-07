@@ -1,23 +1,23 @@
 # AGDTech Casino Backend
 
-Plateforme de casino multi-jeux (roulette europeenne en production, autres jeux en preparation) basee sur une architecture microservices FastAPI + Postgres + Redis, derriere une gateway Traefik. Deux clients web React sont fournis (POS agent + backoffice admin). Un client Unity se connecte au moteur de jeu via WebSocket pour la roulette en temps reel.
+Multi-game casino platform (European roulette in production, more games coming) built on a FastAPI + Postgres + Redis microservices architecture, behind a Traefik gateway. Two React web clients are bundled (agent POS + admin backoffice). A Unity client connects to the game engine over WebSocket for real-time roulette.
 
 ---
 
-## Sommaire
+## Table of contents
 
 1. [Architecture](#architecture)
-2. [Lancement local en 2 minutes](#lancement-local-en-2-minutes)
-3. [URLs et points d'acces](#urls-et-points-dacces)
-4. [Authentification](#authentification)
-5. [API REST — endpoints par service](#api-rest--endpoints-par-service)
-6. [Protocole WebSocket roulette (Unity)](#protocole-websocket-roulette-unity)
-7. [Types de paris (roulette)](#types-de-paris-roulette)
-8. [Cycle d'un round](#cycle-dun-round)
-9. [Variables d'environnement](#variables-denvironnement)
+2. [Quick start (2 minutes)](#quick-start-2-minutes)
+3. [URLs and entry points](#urls-and-entry-points)
+4. [Authentication](#authentication)
+5. [REST API — endpoints per service](#rest-api--endpoints-per-service)
+6. [Roulette WebSocket protocol (Unity)](#roulette-websocket-protocol-unity)
+7. [Bet types (roulette)](#bet-types-roulette)
+8. [Round lifecycle](#round-lifecycle)
+9. [Environment variables](#environment-variables)
 10. [Provably fair](#provably-fair)
-11. [Bases de donnees](#bases-de-donnees)
-12. [Depannage](#depannage)
+11. [Databases](#databases)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -40,26 +40,26 @@ Plateforme de casino multi-jeux (roulette europeenne en production, autres jeux 
        └───── Redis ◄──── pub/sub roulette-events ──────► Unity / Web (WebSocket)
 ```
 
-| Service | Tech | Role | DB |
+| Service | Stack | Role | DB |
 |---|---|---|---|
-| `agent-service` | FastAPI + Postgres | Agents, caisses, transactions, login JWT | `casino_agent_db` |
-| `ticket-service` | FastAPI + Postgres + Redis | Emission/paiement tickets, settlement auto | `casino_ticket_db` |
-| `game-roulette-service` | FastAPI + Postgres + Redis | Moteur de jeu (state machine), RNG, WS | `casino_roulette_db` |
-| `display-service` | FastAPI + Redis | Relai WebSocket pour clients passifs | (stateless) |
-| `backoffice` | React 18 + Vite + Tailwind | Console admin (multi-jeux) | — |
-| `agent-web` | React 18 + Vite + Tailwind | POS agent | — |
+| `agent-service` | FastAPI + Postgres | Agents, cash registers, transactions, JWT login | `casino_agent_db` |
+| `ticket-service` | FastAPI + Postgres + Redis | Ticket issuance/payout, automatic settlement | `casino_ticket_db` |
+| `game-roulette-service` | FastAPI + Postgres + Redis | Game engine (state machine), RNG, WebSocket | `casino_roulette_db` |
+| `display-service` | FastAPI + Redis | WebSocket relay for passive clients (TV displays) | (stateless) |
+| `backoffice` | React 18 + Vite + Tailwind | Admin console (multi-game) | — |
+| `agent-web` | React 18 + Vite + Tailwind | Agent POS | — |
 
-**Communication inter-services** : HTTP synchrone (ticket -> agent) + Redis Pub/Sub (roulette -> ticket pour le settlement, roulette -> display pour la diffusion).
+**Inter-service communication:** synchronous HTTP (ticket -> agent for cash debit/credit) + Redis Pub/Sub (roulette -> ticket for settlement, roulette -> display for fan-out).
 
 ---
 
-## Lancement local en 2 minutes
+## Quick start (2 minutes)
 
-### Pre-requis
+### Requirements
 - Docker Desktop >= 4.20
-- Port 80 et 8080 libres
+- Ports `80` and `8080` available
 
-### Demarrage
+### Start
 
 ```bash
 git clone https://github.com/agdtechbet/casino-backend.git
@@ -67,88 +67,88 @@ cd casino-backend
 docker compose up -d --build
 ```
 
-Tous les services demarrent automatiquement, les migrations Alembic s'executent au boot, le moteur de roulette commence sa boucle de tours.
+All services start automatically. Alembic migrations run on boot. The roulette engine begins its round loop immediately.
 
-Verifier que tout est OK :
+Verify everything is up:
 ```bash
-docker compose ps         # tous les services doivent etre "running" / "healthy"
-docker compose logs -f game-roulette-service   # voir le cycle BETTING > SPINNING > RESULT
+docker compose ps         # all services should be "running" / "healthy"
+docker compose logs -f game-roulette-service   # watch BETTING > SPINNING > RESULT cycle
 ```
 
-### Arret / Reset
+### Stop / reset
 
 ```bash
-docker compose down              # arrete tout (les donnees postgres restent)
-docker compose down -v           # arrete + supprime les volumes (reset complet)
+docker compose down              # stop everything (Postgres data persists)
+docker compose down -v           # stop + delete volumes (full reset)
 ```
 
 ---
 
-## URLs et points d'acces
+## URLs and entry points
 
-Tout transite par Traefik sur le port **80**.
+Everything is routed through Traefik on port **80**.
 
-| URL | Service | Usage |
+| URL | Service | Purpose |
 |---|---|---|
-| http://localhost/ | backoffice | Console admin (login API key) |
-| http://localhost/agents/pos | agent-web | POS agent (login phone/password) |
-| http://localhost/api/agents/docs | agent-service | **Swagger** agents/caisse/auth |
-| http://localhost/api/tickets/docs | ticket-service | **Swagger** tickets |
-| http://localhost/api/roulette/docs | game-roulette-service | **Swagger** roulette |
-| http://localhost/api/display/docs | display-service | **Swagger** display |
-| ws://localhost/ws/roulette | game-roulette-service | **WebSocket Unity (recommande)** |
-| ws://localhost/api/display/ws/roulette | display-service | WebSocket relai (lecture seule) |
-| http://localhost:8080 | traefik | Dashboard Traefik |
+| http://localhost/ | backoffice | Admin console (login with API key) |
+| http://localhost/agents/pos | agent-web | Agent POS (login with phone/password) |
+| http://localhost/api/agents/docs | agent-service | **Swagger** — agents/cash/auth |
+| http://localhost/api/tickets/docs | ticket-service | **Swagger** — tickets |
+| http://localhost/api/roulette/docs | game-roulette-service | **Swagger** — roulette |
+| http://localhost/api/display/docs | display-service | **Swagger** — display |
+| ws://localhost/ws/roulette | game-roulette-service | **Unity WebSocket (recommended)** |
+| ws://localhost/api/display/ws/roulette | display-service | WebSocket relay (read-only) |
+| http://localhost:8080 | traefik | Traefik dashboard |
 
-> **Pour Unity**, utiliser de preference `ws://localhost/ws/roulette` qui est sur le moteur de jeu lui-meme. `display-service` est un relai pour les ecrans passifs sans charge bidirectionnelle.
+> **For Unity**, prefer `ws://localhost/ws/roulette` which connects directly to the game engine. `display-service` is a relay intended for passive screens that don't need bidirectional load.
 
-En production (ALB/ECS), remplacer `localhost` par le DNS de l'ALB. Les chemins (`/api/agents`, `/ws/roulette`...) restent identiques.
+In production (ALB/ECS), replace `localhost` with the ALB DNS name. Paths (`/api/agents`, `/ws/roulette`, ...) stay identical.
 
 ---
 
-## Authentification
+## Authentication
 
-Deux mecanismes coexistent :
+Two mechanisms coexist:
 
-### 1. JWT (agents/caissiers)
-Utilise par `agent-service` et `ticket-service` pour proteger les endpoints "POS".
+### 1. JWT (agents / cashiers)
+Used by `agent-service` and `ticket-service` to protect POS endpoints.
 
-- Login : `POST /api/agents/login` avec `{ phone, password }`
-- Reponse : `{ access_token, token_type: "bearer", agent_id, agent_name }`
-- A chaque requete protegee : header `Authorization: Bearer <access_token>`
+- Login: `POST /api/agents/login` with `{ phone, password }`
+- Response: `{ access_token, token_type: "bearer", agent_id, agent_name }`
+- Each protected request: header `Authorization: Bearer <access_token>`
 
-Algo : HS256, secret `JWT_SECRET` (env), `sub` = `agent_id` (UUID).
+Algo: HS256, secret from `JWT_SECRET` env var, `sub` = `agent_id` (UUID).
 
 ### 2. Admin API Key (backoffice)
-Utilise pour les endpoints `/admin/*` (CRUD agents, stats globales, historique...).
+Used for `/admin/*` endpoints (CRUD agents, global stats, history, ...).
 
-- Header : `X-API-Key: <ADMIN_API_KEY>`
-- Cle par defaut (a remplacer en prod) : `CleSuperSecreteBackoffice2026`
+- Header: `X-API-Key: <ADMIN_API_KEY>`
+- Default key (replace in production): `CleSuperSecreteBackoffice2026`
 
-> Le moteur de roulette **n'expose aucun endpoint protege par JWT** — seuls les endpoints admin (`/admin/history`) sont keyguarded. Le WebSocket est public (lecture seule).
+> The roulette engine **does not protect any endpoint with JWT** — only admin endpoints (`/admin/history`) are key-guarded. The WebSocket is public (read-only stream).
 
 ---
 
-## API REST — endpoints par service
+## REST API — endpoints per service
 
 ### `agent-service` — `/api/agents`
 
-| Methode | Path | Auth | Description |
+| Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/login` | public | Login agent (phone + password) |
-| POST | `/` | admin key | Creer un agent (+caisse) |
-| POST | `/register` | admin key | Idem (alias) |
-| GET | `/` | admin key | Liste paginee des agents |
-| GET | `/admin/stats` | admin key | Nombre d'agents actifs |
-| GET | `/admin/transactions?skip=&limit=` | admin key | Toutes les transactions de caisse |
-| GET | `/admin/{agent_id}` | admin key | Detail agent + caisse |
-| PATCH | `/admin/{agent_id}` | admin key | MAJ agent (suspension, kiosk...) |
-| GET | `/{agent_id}` | JWT | Detail agent (self) |
-| PATCH | `/{agent_id}` | JWT | MAJ agent (self) |
-| POST | `/{agent_id}/provision` | admin key | Approvisionner / debiter une caisse |
+| POST | `/login` | public | Agent login (phone + password) |
+| POST | `/` | admin key | Create an agent (+ cash register) |
+| POST | `/register` | admin key | Same (alias) |
+| GET | `/` | admin key | Paginated agents list |
+| GET | `/admin/stats` | admin key | Active agents count |
+| GET | `/admin/transactions?skip=&limit=` | admin key | All cash register transactions |
+| GET | `/admin/{agent_id}` | admin key | Agent detail + cash register |
+| PATCH | `/admin/{agent_id}` | admin key | Update agent (suspension, kiosk, ...) |
+| GET | `/{agent_id}` | JWT | Agent detail (self) |
+| PATCH | `/{agent_id}` | JWT | Update agent (self) |
+| POST | `/{agent_id}/provision` | admin key | Credit / debit a cash register |
 | GET | `/status` | public | Healthcheck |
 
-**Schema agent** :
+**Agent schema:**
 ```json
 {
   "id": "uuid",
@@ -162,7 +162,7 @@ Utilise pour les endpoints `/admin/*` (CRUD agents, stats globales, historique..
 }
 ```
 
-**Provision** :
+**Provision payload:**
 ```json
 {
   "amount": 50000,
@@ -174,19 +174,19 @@ Utilise pour les endpoints `/admin/*` (CRUD agents, stats globales, historique..
 
 ### `ticket-service` — `/api/tickets`
 
-| Methode | Path | Auth | Description |
+| Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/` | JWT | Creer un ticket (multi-paris) |
-| GET | `/{short_code}` | JWT | Lire un ticket par code |
-| POST | `/{short_code}/payout` | JWT | Payer un ticket gagnant |
+| POST | `/` | JWT | Create a ticket (multi-bet) |
+| GET | `/{short_code}` | JWT | Read a ticket by short code |
+| POST | `/{short_code}/payout` | JWT | Pay out a winning ticket |
 | GET | `/admin/stats` | admin key | Total wager / payout / tickets |
-| GET | `/admin/agents-performance` | admin key | Top 5 agents par volume |
+| GET | `/admin/agents-performance` | admin key | Top 5 agents by volume |
 | GET | `/status` | public | Healthcheck |
 
-**Creer un ticket** (`POST /api/tickets/`) :
+**Create a ticket** (`POST /api/tickets/`):
 ```json
 {
-  "agent_id": "uuid-de-l-agent",
+  "agent_id": "agent-uuid",
   "game_id": "ROULETTE-TBL1",
   "round_id": "ROUND-1714986300",
   "bets": [
@@ -197,9 +197,9 @@ Utilise pour les endpoints `/admin/*` (CRUD agents, stats globales, historique..
 }
 ```
 
-Le serveur verifie que la roulette est en phase `Betting` ET que le `round_id` correspond au round courant. Sinon : 400.
+The server checks that the roulette is in the `Betting` phase **and** that `round_id` matches the current round. Otherwise: 400.
 
-**Reponse ticket** :
+**Ticket response:**
 ```json
 {
   "id": "uuid",
@@ -218,30 +218,30 @@ Le serveur verifie que la roulette est en phase `Betting` ET que le `round_id` c
 
 ### `game-roulette-service` — `/api/roulette` + `/ws/roulette`
 
-| Methode | Path | Auth | Description |
+| Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/status` | public | Etat actuel du jeu (round_id, phase, result) |
-| GET | `/admin/history` | admin key | 10 derniers rounds avec server_seed reveles |
-| WS | `/ws/roulette` | public | WebSocket principal (Unity) |
-| WS | `/api/display/ws/roulette` | public | Alias Traefik (meme chose) |
+| GET | `/status` | public | Current game state (round_id, phase, result) |
+| GET | `/admin/history` | admin key | Last 10 rounds with revealed `server_seed` |
+| WS | `/ws/roulette` | public | Main WebSocket (Unity) |
+| WS | `/api/display/ws/roulette` | public | Traefik alias (same socket) |
 
 ### `display-service` — `/api/display`
 
-| Methode | Path | Auth | Description |
+| Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/history` | public | Liste des derniers numeros (pour stats) |
-| WS | `/ws/roulette` | public | Relai WS lecture seule |
+| GET | `/history` | public | Recent winning numbers (for stats) |
+| WS | `/ws/roulette` | public | Read-only WebSocket relay |
 
 ---
 
-## Protocole WebSocket roulette (Unity)
+## Roulette WebSocket protocol (Unity)
 
-URL : `ws://localhost/ws/roulette` (en local) ou `ws://<alb-dns>/ws/roulette` (prod).
+URL: `ws://localhost/ws/roulette` (local) or `ws://<alb-dns>/ws/roulette` (prod).
 
-**Pas d'authentification** — la connexion est ouverte. Les messages sont du JSON. Tous les timestamps `serverTime` sont des `float` UNIX (secondes).
+**No authentication** — the connection is open. Messages are JSON. All `serverTime` fields are UNIX `float` seconds.
 
-### A la connexion : `welcome`
-Le serveur pousse immediatement l'etat courant.
+### On connect: `welcome`
+The server immediately pushes the current state.
 ```json
 {
   "type": "welcome",
@@ -253,9 +253,9 @@ Le serveur pousse immediatement l'etat courant.
   "result": null
 }
 ```
-> Si la phase est `Spinning` ou `Result`, `result` contient deja `{ "number", "color", "isEven", "isHigh" }`.
+> If the phase is `Spinning` or `Result`, `result` already contains `{ "number", "color", "isEven", "isHigh" }`.
 
-### A chaque transition de phase : `phase_changed`
+### On phase transition: `phase_changed`
 ```json
 {
   "type": "phase_changed",
@@ -265,10 +265,10 @@ Le serveur pousse immediatement l'etat courant.
   "duration": 5.0
 }
 ```
-**Phases** dans l'ordre : `Betting` (30s) -> `BetsClosing` (5s) -> `Spinning` (12s) -> `Result` (5s) -> nouveau round.
+**Phase order:** `Betting` (30s) -> `BetsClosing` (5s) -> `Spinning` (12s) -> `Result` (5s) -> next round.
 
-### Resultat revele en avance : `result_revealed`
-Envoye **a 11s du spin** (1s avant la fin) pour permettre l'animation cote Unity.
+### Result revealed early: `result_revealed`
+Sent **at 11s into Spinning** (1s before the end) so Unity can pre-roll the wheel animation.
 ```json
 {
   "type": "result_revealed",
@@ -282,10 +282,10 @@ Envoye **a 11s du spin** (1s avant la fin) pour permettre l'animation cote Unity
   }
 }
 ```
-Couleurs possibles : `"Red"`, `"Black"`, `"Green"` (zero uniquement). `isHigh` : true si 19-36, false si 1-18, false pour 0.
+Possible colors: `"Red"`, `"Black"`, `"Green"` (zero only). `isHigh`: true if 19-36, false if 1-18, false for 0.
 
-### Stats mises a jour : `stats_updated`
-Envoye apres chaque tirage.
+### Stats refreshed: `stats_updated`
+Sent right after each spin.
 ```json
 {
   "type": "stats_updated",
@@ -313,46 +313,46 @@ Envoye apres chaque tirage.
   }
 }
 ```
-- Pourcentages **toujours en sommes entieres = 100** (largest remainder method).
-- `numberFrequencies` : tableau de 37 entiers, index = numero.
-- `history` : 200 derniers numeros, plus ancien -> plus recent.
-- `hotNumbers` / `coldNumbers` : 7 elements chacun.
+- Percentages are **always integers that sum to 100** (largest remainder method).
+- `numberFrequencies`: array of 37 ints, index = number.
+- `history`: last 200 numbers, oldest -> newest.
+- `hotNumbers` / `coldNumbers`: 7 entries each.
 
-### Heartbeat : `ping` / `pong`
-Le client peut envoyer :
+### Heartbeat: `ping` / `pong`
+Client sends:
 ```json
 { "type": "ping", "clientTime": 1714986300.0 }
 ```
-Le serveur repond :
+Server replies:
 ```json
 { "type": "pong", "clientTime": 1714986300.0, "serverTime": 1714986300.123 }
 ```
-> Recommande pour Unity : ping toutes les 15s pour calculer le RTT et detecter une coupure.
+> Recommended for Unity: ping every 15s to compute RTT and detect dropped sockets.
 
-### Reconnexion
-En cas de coupure, **se reconnecter avec backoff exponentiel** (1s -> 2s -> 4s -> 8s -> 30s max). Le `welcome` qui suit donne directement l'etat a jour.
+### Reconnect
+On disconnect, **reconnect with exponential backoff** (1s -> 2s -> 4s -> 8s -> 30s max). The next `welcome` resyncs the state.
 
 ---
 
-## Types de paris (roulette)
+## Bet types (roulette)
 
-Tous les `bet_target` sont des strings.
+All `bet_target` values are strings.
 
-### Paris interieurs
+### Inside bets
 
-| `bet_type` | `bet_target` | Cote | Exemple |
+| `bet_type` | `bet_target` | Payout | Example |
 |---|---|---|---|
-| `STRAIGHT` | `"17"` | x36 | Plein sur le 17 |
-| `SPLIT` | `"17,20"` | x18 | A cheval entre 17 et 20 |
-| `STREET` | `"4,5,6"` | x12 | Transversale ligne 4-6 |
-| `CORNER` | `"4,5,7,8"` | x9 | Carre 4-5-7-8 |
-| `SIX_LINE` | `"4,5,6,7,8,9"` | x6 | Sixain |
+| `STRAIGHT` | `"17"` | x36 | Straight up on 17 |
+| `SPLIT` | `"17,20"` | x18 | Split between 17 and 20 |
+| `STREET` | `"4,5,6"` | x12 | Street row 4-6 |
+| `CORNER` | `"4,5,7,8"` | x9 | Corner 4-5-7-8 |
+| `SIX_LINE` | `"4,5,6,7,8,9"` | x6 | Six line |
 
-> Les numeros dans `bet_target` sont separes par virgules. **Pas d'espaces.**
+> Numbers in `bet_target` are comma-separated, **no spaces**.
 
-### Paris exterieurs
+### Outside bets
 
-| `bet_type` | `bet_target` | Cote |
+| `bet_type` | `bet_target` | Payout |
 |---|---|---|
 | `COLUMN` | `"Col1"` / `"Col2"` / `"Col3"` | x3 |
 | `DOZEN` | `"1st"` / `"2nd"` / `"3rd"` | x3 |
@@ -360,70 +360,70 @@ Tous les `bet_target` sont des strings.
 | `EVEN_ODD` | `"EVEN"` / `"ODD"` | x2 |
 | `HALF` | `"1-18"` / `"19-36"` | x2 |
 
-> **Le 0 fait perdre tous les paris exterieurs** (regle europeenne).
+> **Zero loses every outside bet** (European rule).
 
-La cote inclut la mise (gain net = cote - 1). Ex : Plein 1000 XAF gagnant -> `payout = 36000` (gain net 35000 + mise 1000).
+The payout multiplier includes the original stake (net win = payout - 1). Example: a winning STRAIGHT of 1000 XAF returns `payout = 36000` (net 35000 + 1000 stake).
 
 ---
 
-## Cycle d'un round
+## Round lifecycle
 
 ```
 T=0s     Betting (30s)         ──► phase_changed { phase: "Betting" }
-                                  Tickets ouverts a la creation
+                                  Tickets accepted via POST /api/tickets/
 T=30s    BetsClosing (5s)      ──► phase_changed { phase: "BetsClosing" }
-                                  Tickets refuses (400)
+                                  Tickets rejected (400)
 T=35s    Spinning (12s)        ──► phase_changed { phase: "Spinning", result: {...} }
-T=46s                          ──► result_revealed { result: {...} }   (1s avant la fin)
+T=46s                          ──► result_revealed { result: {...} }   (1s before end)
 T=47s                          ──► stats_updated { stats: {...} }
-                               ──► Redis publish "ROUND_FINISHED"      (ticket-service paye)
+                               ──► Redis publish "ROUND_FINISHED" (ticket-service settles)
 T=47s    Result (5s)           ──► phase_changed { phase: "Result", result: {...} }
-T=52s    -> nouveau round
+T=52s    -> next round
 ```
 
-Le `round_id` change a chaque cycle (`ROUND-<unix_timestamp>`). C'est cette valeur que le POS doit renvoyer dans `POST /api/tickets/`.
+The `round_id` rotates each cycle (`ROUND-<unix_timestamp>`). The POS must echo this exact value in `POST /api/tickets/`.
 
 ---
 
-## Variables d'environnement
+## Environment variables
 
-Definies dans `docker-compose.yml`. **A surcharger en prod via secrets ECS / .env.**
+Defined in `docker-compose.yml`. **Override in production via ECS secrets / .env files.**
 
-| Variable | Service | Defaut | Description |
+| Variable | Service | Default | Description |
 |---|---|---|---|
-| `JWT_SECRET` | agent, ticket | `MonSuperSecretCasino2026!NePasPartager` | Cle de signature JWT |
-| `ADMIN_API_KEY` | agent, ticket, roulette | `CleSuperSecreteBackoffice2026` | Cle admin pour `/admin/*` |
-| `REDIS_URL` | ticket, roulette, display | `redis://casino_redis:6379/0` | URL Redis |
-| `DATABASE_URL` | roulette | `postgresql+asyncpg://...` | DSN async Postgres |
-| `ROOT_PATH` | agent, ticket, roulette | `/api/agents` etc. | Prefix Traefik (Swagger fonctionne) |
+| `JWT_SECRET` | agent, ticket | `MonSuperSecretCasino2026!NePasPartager` | JWT signing key |
+| `ADMIN_API_KEY` | agent, ticket, roulette | `CleSuperSecreteBackoffice2026` | Admin key for `/admin/*` |
+| `REDIS_URL` | ticket, roulette, display | `redis://casino_redis:6379/0` | Redis URL |
+| `DATABASE_URL` | roulette | `postgresql+asyncpg://...` | Async Postgres DSN |
+| `ROOT_PATH` | agent, ticket, roulette | `/api/agents` etc. | Traefik prefix (so Swagger works) |
 
-> Les credentials Postgres (`casino_admin` / `super_secret_password`) sont en clair dans `docker-compose.yml`. **A bouger dans des secrets pour la prod.**
+> Postgres credentials (`casino_admin` / `super_secret_password`) are in clear text in `docker-compose.yml`. **Move them to secrets for production.**
 
 ---
 
 ## Provably fair
 
-Pour chaque round, le moteur :
-1. Genere un `server_seed` aleatoire de 32 hex chars (`secrets.token_hex(16)`).
-2. Calcule `server_seed_hash = sha256(server_seed)`.
-3. Calcule le numero gagnant : `int(hmac_sha256(server_seed, round_id)[:8], 16) % 37`.
-4. Stocke `server_seed` + `server_seed_hash` + `round_id` + `winning_number` dans `roulette_rounds`.
+For each round, the engine:
+1. Generates a random `server_seed` (32 hex chars from `secrets.token_hex(16)`).
+2. Computes `server_seed_hash = sha256(server_seed)`.
+3. Derives the winning number: `int(hmac_sha256(server_seed, round_id)[:8], 16) % 37`.
+4. Persists `server_seed`, `server_seed_hash`, `round_id`, `winning_number` to `roulette_rounds`.
 
-Apres le round, le `server_seed` est expose via `GET /api/roulette/admin/history` pour audit. Un joueur peut recalculer `hmac_sha256(seed, round_id) % 37` et verifier que le numero correspond.
+After the round, the `server_seed` is exposed via `GET /api/roulette/admin/history` for audit. A player can recompute `hmac_sha256(seed, round_id) % 37` and verify the winning number.
 
 ---
 
-## Bases de donnees
+## Databases
 
-Trois bases distinctes (isolation par bounded context) sur **une seule instance Postgres 16** :
+Three separate databases (one per bounded context) on **a single Postgres 16 instance**:
 
-| Database | Tables principales |
+| Database | Main tables |
 |---|---|
 | `casino_agent_db` | `agents`, `cash_registers`, `cash_register_transactions` |
 | `casino_ticket_db` | `tickets`, `ticket_bets` |
 | `casino_roulette_db` | `roulette_rounds` |
 
-Les migrations Alembic se lancent automatiquement au demarrage (commande `alembic upgrade head` avant `uvicorn`). Pour creer une nouvelle migration apres modification de modele :
+Alembic migrations run automatically on boot (`alembic upgrade head` runs before `uvicorn`). To create a new migration after a model change:
 ```bash
 docker compose exec ticket-service alembic revision --autogenerate -m "add new field"
 docker compose exec ticket-service alembic upgrade head
@@ -431,29 +431,29 @@ docker compose exec ticket-service alembic upgrade head
 
 ---
 
-## Depannage
+## Troubleshooting
 
-| Symptome | Cause / Fix |
+| Symptom | Cause / fix |
 |---|---|
-| `503 Le jeu est actuellement hors ligne` lors de `POST /api/tickets/` | `game-roulette-service` pas demarre. Verifier `docker compose ps`. |
-| `400 Round invalide` | Le `round_id` envoye est decale — toujours le lire depuis le dernier `welcome` ou `phase_changed` recu en WS. |
-| WebSocket se reconnecte en boucle | Verifier que Traefik route bien `PathPrefix(\`/ws/roulette\`)` (cf. `docker-compose.yml:135`). |
-| Stats vides apres redemarrage | `redis:7-alpine` n'a pas de volume — l'historique est volatile. Ajouter un volume si besoin. |
-| `npm install` modifie le `package-lock.json` puis Vite ne resout pas | Recreer le conteneur : `docker compose rm -sf <web-service> && docker compose up -d --force-recreate --build <web-service>`. Le volume anonyme `/app/node_modules` est purge. |
+| `503 Le jeu est actuellement hors ligne` on `POST /api/tickets/` | `game-roulette-service` not started. Check `docker compose ps`. |
+| `400 Round invalide` | The `round_id` is stale — always read it from the most recent `welcome` or `phase_changed` WS frame. |
+| WebSocket reconnect loop | Check Traefik routes `PathPrefix(\`/ws/roulette\`)` (see `docker-compose.yml:135`). |
+| Stats empty after restart | `redis:7-alpine` has no volume — history is volatile. Add a volume if persistence is needed. |
+| `npm install` updates `package-lock.json` then Vite cannot resolve modules | Recreate the container: `docker compose rm -sf <web-service> && docker compose up -d --force-recreate --build <web-service>`. The anonymous `/app/node_modules` volume is purged. |
 
 ---
 
 ## Roadmap
 
-- [x] Roulette europeenne (provably fair, 10 types de paris, settlement auto)
-- [x] POS agent (web)
-- [x] Backoffice multi-jeux (stats roulette live, agents, transactions, settings placeholder)
-- [x] Pipeline CI/CD ECS + ALB
-- [ ] Client Unity (en cours, integration en suivant ce README)
-- [ ] Autres jeux (a venir : blackjack, paris sportifs)
+- [x] European roulette (provably fair, 10 bet types, automatic settlement)
+- [x] Agent POS (web)
+- [x] Multi-game backoffice (live roulette stats, agents, transactions, settings placeholder)
+- [x] CI/CD pipeline ECS + ALB
+- [ ] Unity client (in progress, integrating against this README)
+- [ ] More games (planned: blackjack, sports betting)
 
 ---
 
-## Licence
+## License
 
-Proprietaire — AGDTech Bet. Tous droits reserves.
+Proprietary — AGDTech Bet. All rights reserved.
