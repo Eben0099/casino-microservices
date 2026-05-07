@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const WS_URL = `ws://${window.location.host}/api/display/ws/roulette`;
+const WS_URL = `ws://${window.location.host}/ws/roulette`;
 
 export function useRouletteWs() {
   const [connected, setConnected] = useState(false);

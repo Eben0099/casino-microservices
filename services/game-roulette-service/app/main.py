@@ -69,6 +69,23 @@ class ConnectionManager:
         }
         await websocket.send_json(welcome_msg)
 
+        # Envoie immédiatement les stats actuelles pour que les nouveaux clients
+        # n'aient pas à attendre le prochain spin (~50s) pour voir les charts
+        try:
+            if redis_client:
+                redis_hist = await redis_client.lrange("roulette:history", 0, 199)
+                if redis_hist:
+                    history_numbers = [int(x) for x in reversed(redis_hist)]
+                    stats_payload = calculate_stats(history_numbers)
+                    await websocket.send_json({
+                        "type": "stats_updated",
+                        "serverTime": time.time(),
+                        "gameId": current_game_state["round_id"],
+                        "stats": stats_payload
+                    })
+        except Exception:
+            pass
+
 manager = ConnectionManager()
 
 @app.on_event("startup")
