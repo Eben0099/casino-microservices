@@ -3,6 +3,7 @@ import json
 import os
 import hashlib
 import hmac
+import random
 import secrets
 import time
 from datetime import datetime
@@ -13,7 +14,10 @@ from sqlalchemy import select
 from .database import engine, SessionLocal
 from .models import RouletteRound
 from .rules import get_number_properties, calculate_stats
-from .settings import load_settings, save_settings, DEFAULT_SETTINGS
+
+# Number of synthetic results used to populate stats on the very first boot
+# (only when Redis history is empty — never overwrites real production data).
+INITIAL_HISTORY_SEED_COUNT = 200
 
 app = FastAPI(
     title="AGDTech Roulette Engine",
@@ -36,6 +40,10 @@ current_game_state = {
     "duration": TIME_BETTING,
     "result": None
 }
+
+# Dernier snapshot de stats (rejoué aux clients qui se connectent après welcome
+# pour qu'ils n'aient pas un dashboard vide pendant ~47s en attendant le 1er round)
+current_stats = None
 
 class ConnectionManager:
     def __init__(self):
@@ -70,22 +78,15 @@ class ConnectionManager:
         }
         await websocket.send_json(welcome_msg)
 
-        # Envoie immédiatement les stats actuelles pour que les nouveaux clients
-        # n'aient pas à attendre le prochain spin (~50s) pour voir les charts
-        try:
-            if redis_client:
-                redis_hist = await redis_client.lrange("roulette:history", 0, 199)
-                if redis_hist:
-                    history_numbers = [int(x) for x in reversed(redis_hist)]
-                    stats_payload = calculate_stats(history_numbers)
-                    await websocket.send_json({
-                        "type": "stats_updated",
-                        "serverTime": time.time(),
-                        "gameId": current_game_state["round_id"],
-                        "stats": stats_payload
-                    })
-        except Exception:
-            pass
+        # Rejoue le dernier stats_updated connu pour que le dashboard du client
+        # soit peuplé immédiatement (sinon il reste vide jusqu'au prochain round).
+        if current_stats is not None:
+            await websocket.send_json({
+                "type": "stats_updated",
+                "serverTime": time.time(),
+                "gameId": current_game_state["round_id"],
+                "stats": current_stats
+            })
 
 manager = ConnectionManager()
 
@@ -141,7 +142,9 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
         }))
 
 async def game_loop():
+    global current_stats
     print("🎰 Moteur de Roulette (Provably Fair) + WebSockets Unity démarré !")
+
 
     # On charge l'historique existant en base si disponible
     history_numbers = []
@@ -152,6 +155,26 @@ async def game_loop():
                 history_numbers = [int(x) for x in reversed(redis_hist)]
     except Exception:
         pass
+
+    # Premier boot avec Redis vide : on amorce l'historique avec des résultats
+    # aléatoires pour que les stats (hot/cold/freq/percentages) aient une
+    # distribution visuellement réaliste dès la 1re connexion. On ne touche
+    # jamais à un historique déjà existant — la prod ne sera pas écrasée.
+    if not history_numbers and INITIAL_HISTORY_SEED_COUNT > 0:
+        history_numbers = [random.randint(0, 36) for _ in range(INITIAL_HISTORY_SEED_COUNT)]
+        if redis_client:
+            try:
+                # LPUSH met le plus récent en tête → on push de l'ancien au plus récent
+                for n in history_numbers:
+                    await redis_client.lpush("roulette:history", str(n))
+                await redis_client.ltrim("roulette:history", 0, 199)
+            except Exception as e:
+                print(f"[seed] Redis lpush failed: {e}")
+        print(f"[seed] Historique amorcé avec {len(history_numbers)} résultats aléatoires")
+
+    # Pré-calcule les stats initiales pour que les clients qui se connectent
+    # AVANT la fin du 1er round aient déjà un dashboard peuplé via welcome.
+    current_stats = calculate_stats(history_numbers)
 
     while True:
         try:
@@ -196,13 +219,10 @@ async def game_loop():
             # ÉTAT 3 : SPINNING
             # ==========================================
             print(f"🟡 [SPINNING] {round_id} - Target: {winning_number}")
-            await set_game_phase("Spinning", t_spinning, round_id, result_payload)
+            await set_game_phase("Spinning", TIME_SPINNING, round_id, result_payload)
 
-            # On envoie result_revealed AVANT la fin du spin (e.g. 11s)
-            delay_before_reveal = max(0.0, t_spinning - 1.0)
-            await asyncio.sleep(delay_before_reveal)
-            
-            # --- RESULT_REVEALED ---
+            # The Unity wheel needs the result at the START of Spinning so it can
+            # spin for the full phase duration and land exactly when the phase ends.
             result_revealed_payload = {
                 "type": "result_revealed",
                 "serverTime": time.time(),
@@ -212,8 +232,8 @@ async def game_loop():
             await manager.broadcast(result_revealed_payload)
             if redis_client:
                 await redis_client.publish("roulette-events", json.dumps(result_revealed_payload))
-            
-            await asyncio.sleep(1.0) # Fin de la phase Spinning
+
+            await asyncio.sleep(TIME_SPINNING)
             
             # Update history and calculate stats
             history_numbers.append(winning_number)
@@ -225,7 +245,8 @@ async def game_loop():
                 await redis_client.ltrim("roulette:history", 0, 199)
                 
             stats_payload = calculate_stats(history_numbers)
-            
+            current_stats = stats_payload
+
             # --- STATS_UPDATED ---
             stats_updated_payload = {
                 "type": "stats_updated",

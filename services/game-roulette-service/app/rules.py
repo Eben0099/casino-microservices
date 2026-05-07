@@ -40,8 +40,9 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
     dozens = [0, 0, 0]
     cols = [0, 0, 0]
     sectors = [0, 0, 0, 0, 0, 0]
-    lines = [0, 0, 0, 0, 0, 0]
-    
+    # Lines = 12 streets of 3 consecutive non-zero numbers (1-3, 4-6, ..., 34-36)
+    lines = [0] * 12
+
     frequencies = [0] * 37
     
     # Wheel sectors layout from BACKEND_PROTOCOL.md
@@ -54,38 +55,35 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
         29: 5, 7: 5, 28: 5, 12: 5, 35: 5, 3: 5, 26: 5
     }
 
-    history_payload = []
-    
     for n in history_numbers:
         props = get_number_properties(n)
-        history_payload.append(props)
         frequencies[n] += 1
-        
+
         if props["color"] == "Red":
             red_count += 1
         elif props["color"] == "Black":
             black_count += 1
         else:
             green_count += 1
-            
+
         if n != 0:
             if props["isEven"]:
                 even_count += 1
             else:
                 odd_count += 1
-                
+
             if props["isHigh"]:
                 high_count += 1
             else:
                 low_count += 1
-                
+
             # Dozens
             dozens[(n - 1) // 12] += 1
             # Columns
             cols[(n - 1) % 3] += 1
-            # Lines
-            lines[(n - 1) // 6] += 1
-            
+            # Lines: 12 streets of 3 numbers each ((n-1)//3 → 0..11)
+            lines[(n - 1) // 3] += 1
+
         # Sectors
         sectors[sectors_map[n]] += 1
 
@@ -133,6 +131,19 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
     freq_asc = sorted(freq_with_num, key=lambda x: (x[0], x[1]))
     cold_numbers = [x[1] for x in freq_asc[:7]]
 
+    # History: only the last 10 spins, in chronological order (oldest first).
+    # Each entry carries the total occurrence count of that number across the
+    # full tracked history — what the UI displays as "appeared N times".
+    recent = history_numbers[-10:]
+    history_compact = [
+        {
+            "number": n,
+            "color": get_number_properties(n)["color"],
+            "count": frequencies[n]
+        }
+        for n in recent
+    ]
+
     return {
         "redPercent": colors_pct[0],
         "blackPercent": colors_pct[1],
@@ -148,10 +159,12 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
         "hotNumbers": hot_numbers,
         "coldNumbers": cold_numbers,
         "numberFrequencies": frequencies,
-        "history": history_payload[-200:]
+        "history": history_compact
     }
 
 def _get_empty_stats() -> Dict[str, Any]:
+    # 12-entry lines defaults: 8 cells at 8% + 4 cells at 9% = 100
+    lines_default = [8.0] * 8 + [9.0] * 4
     return {
         "redPercent": 48.6,
         "blackPercent": 48.6,
@@ -163,9 +176,9 @@ def _get_empty_stats() -> Dict[str, Any]:
         "dozensPercents": [33.0, 33.0, 34.0],
         "columnsPercents": [33.0, 33.0, 34.0],
         "sectorsPercents": [16.0, 16.0, 17.0, 17.0, 17.0, 17.0],
-        "linesPercents": [16.0, 16.0, 17.0, 17.0, 17.0, 17.0],
+        "linesPercents": lines_default,
         "hotNumbers": [0, 1, 2, 3, 4, 5, 6],
         "coldNumbers": [36, 35, 34, 33, 32, 31, 30],
-        "numberFrequencies": [0]*37,
+        "numberFrequencies": [0] * 37,
         "history": []
     }
