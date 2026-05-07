@@ -43,9 +43,11 @@ function Dashboard() {
   const ggr = stats.totalWager - stats.totalPayout;
 
   return (
-    <div className="animate-fade">
-      <h1 className="text-2xl font-bold font-title mb-1" style={{ color: 'var(--text-primary)' }}>Vue d'ensemble</h1>
-      <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>Tableau de bord global AGDTech</p>
+    <div className="animate-fade max-w-[1400px] mx-auto">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Vue d'ensemble</h1>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Tableau de bord global AGDTech</p>
+      </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

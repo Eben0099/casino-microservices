@@ -30,10 +30,10 @@ function Transactions() {
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 
   return (
-    <div className="animate-fade">
+    <div className="animate-fade max-w-[1400px] mx-auto">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold font-title" style={{ color: 'var(--text-primary)' }}>Transactions</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Transactions</h1>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Historique des mouvements de caisse</p>
         </div>
         <button onClick={fetchTransactions}

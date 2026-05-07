@@ -80,13 +80,13 @@ function Agents() {
   const inputStyle = { background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' };
 
   return (
-    <div className="animate-fade">
+    <div className="animate-fade max-w-[1400px] mx-auto">
       {success && <div className="mb-4 px-4 py-3 rounded-lg text-sm font-medium" style={{ background: 'var(--green)15', color: 'var(--green)', border: '1px solid var(--green)30' }}>{success}</div>}
       {error && !showCreateModal && !showProvisionModal && <div className="mb-4 px-4 py-3 rounded-lg text-sm font-medium" style={{ background: 'var(--red)15', color: 'var(--red)', border: '1px solid var(--red)30' }}>{error}</div>}
 
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold font-title" style={{ color: 'var(--text-primary)' }}>Caissiers</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Caissiers</h1>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Gerez vos agents et leurs habilitations</p>
         </div>
         <button onClick={() => { setShowCreateModal(true); setError(''); }}
