@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 
@@ -20,23 +21,25 @@ const PublicRoute = ({ children }) => {
 
 function App() {
   return (
-    <AuthProvider>
-      <Router basename="/agents/pos">
-        <Routes>
-          <Route path="/login" element={
-            <PublicRoute>
-              <Login />
-            </PublicRoute>
-          } />
-          <Route path="/dashboard" element={
-            <PrivateRoute>
-              <Dashboard />
-            </PrivateRoute>
-          } />
-          <Route path="/" element={<Navigate to="/dashboard" />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <Router basename="/agents/pos">
+          <Routes>
+            <Route path="/login" element={
+              <PublicRoute>
+                <Login />
+              </PublicRoute>
+            } />
+            <Route path="/dashboard" element={
+              <PrivateRoute>
+                <Dashboard />
+              </PrivateRoute>
+            } />
+            <Route path="/" element={<Navigate to="/dashboard" />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

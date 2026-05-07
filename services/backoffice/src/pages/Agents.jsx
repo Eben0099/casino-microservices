@@ -1,106 +1,269 @@
-import React from 'react';
-import { LayoutDashboard, Users, Receipt, Settings, LogOut, Plus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Plus, X, Ban, CheckCircle, Wallet, Eye } from 'lucide-react';
+import axios from 'axios';
 
 function Agents() {
-    const navigate = useNavigate();
+  const adminKey = localStorage.getItem('admin_key');
+  const config = { headers: { 'x-api-key': adminKey } };
 
-    const handleLogout = () => {
-        localStorage.removeItem('admin_key');
-        navigate('/login');
-    };
+  const [agents, setAgents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showProvisionModal, setShowProvisionModal] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [agentDetail, setAgentDetail] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [form, setForm] = useState({ phone: '', display_name: '', password: '', kiosk_name: '', kiosk_location: '' });
+  const [provisionForm, setProvisionForm] = useState({ amount: '', description: '' });
 
-    return (
-        <div
-            className="min-h-screen bg-casino-dark bg-cover bg-center bg-no-repeat flex overflow-hidden font-body"
-            style={{ backgroundImage: "url('https://images.unsplash.com/photo-1596838132731-3301c3fd4317?q=80&w=2070&auto=format&fit=crop')" }}
-        >
-            <div className="absolute inset-0 bg-casino-dark/80 backdrop-blur-sm z-0"></div>
+  const fetchAgents = async () => {
+    try {
+      const res = await axios.get('/api/agents', config);
+      setAgents(res.data);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  };
 
-            {/* Sidebar */}
-            <aside className="relative z-10 w-64 bg-casino-card/50 border-r border-white/5 flex flex-col backdrop-blur-md">
-                <div className="p-6 border-b border-white/5">
-                    <h1 className="text-2xl font-bold tracking-wider text-white font-title">
-                        AGD <span className="text-casino-accent">ADMIN</span>
-                    </h1>
-                </div>
+  useEffect(() => { fetchAgents(); }, []);
 
-                <nav className="flex-1 p-4 space-y-2">
-                    <button onClick={() => navigate('/dashboard')} className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-white/5 hover:text-white rounded-xl transition-colors font-medium">
-                        <LayoutDashboard size={20} />
-                        <span>Tableau de bord</span>
-                    </button>
-                    <button onClick={() => navigate('/agents')} className="w-full flex items-center gap-3 px-4 py-3 bg-casino-accent/10 text-casino-accent rounded-xl transition-colors border border-casino-accent/20 font-medium">
-                        <Users size={20} />
-                        <span>Caissiers</span>
-                    </button>
-                    <button className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-white/5 hover:text-white rounded-xl transition-colors font-medium">
-                        <Receipt size={20} />
-                        <span>Transactions</span>
-                    </button>
-                </nav>
+  const handleCreate = async (e) => {
+    e.preventDefault(); setError('');
+    try {
+      await axios.post('/api/agents/register', { phone: form.phone, display_name: form.display_name, password: form.password, kiosk_name: form.kiosk_name || null, kiosk_location: form.kiosk_location || null, role: 'AGENT' }, config);
+      setShowCreateModal(false);
+      setForm({ phone: '', display_name: '', password: '', kiosk_name: '', kiosk_location: '' });
+      setSuccess('Caissier cree avec succes'); setTimeout(() => setSuccess(''), 3000);
+      fetchAgents();
+    } catch (err) { setError(err.response?.data?.detail || 'Erreur lors de la creation'); }
+  };
 
-                <div className="p-4 border-t border-white/5">
-                    <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-red-400 w-full rounded-xl transition-colors font-medium">
-                        <LogOut size={20} />
-                        <span>Déconnexion</span>
-                    </button>
-                </div>
-            </aside>
+  const openDetail = async (agent) => {
+    try { const res = await axios.get(`/api/agents/admin/${agent.id}`, config); setAgentDetail(res.data); }
+    catch { setAgentDetail({ agent, caisse: { balance: 'N/A' } }); }
+    setSelectedAgent(agent); setShowDetailModal(true);
+  };
 
-            {/* Main Content */}
-            <main className="relative z-10 flex-1 p-8 overflow-y-auto">
-                <header className="flex justify-between items-center mb-10">
-                    <div>
-                        <h2 className="text-3xl font-bold text-white font-title uppercase tracking-wider">Gestion des Caissiers</h2>
-                        <p className="text-slate-400 text-sm mt-1 font-light">Gérez vos agents et leurs habilitations</p>
-                    </div>
-                    <button className="bg-casino-accent hover:bg-orange-400 text-casino-dark px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-casino-accent/10 transition-all uppercase">
-                        <Plus size={20} />
-                        NOUVEAU CAISSIER
-                    </button>
-                </header>
+  const toggleSuspend = async (agent) => {
+    try {
+      await axios.patch(`/api/agents/admin/${agent.id}`, { is_suspended: !agent.is_suspended }, config);
+      setSuccess(agent.is_suspended ? 'Agent reactive' : 'Agent suspendu'); setTimeout(() => setSuccess(''), 3000);
+      fetchAgents(); setShowDetailModal(false);
+    } catch (err) { setError(err.response?.data?.detail || 'Erreur'); setTimeout(() => setError(''), 3000); }
+  };
 
-                <div className="bg-casino-card/60 backdrop-blur-md border border-white/5 rounded-3xl shadow-2xl overflow-hidden">
-                    <table className="w-full text-left">
-                        <thead>
-                            <tr className="border-b border-white/5 bg-white/5">
-                                <th className="px-6 py-4 text-xs font-medium text-slate-400 capitalize tracking-widest font-body">Nom de l'Agent</th>
-                                <th className="px-6 py-4 text-xs font-medium text-slate-400 capitalize tracking-widest font-body">Rôle</th>
-                                <th className="px-6 py-4 text-xs font-medium text-slate-400 capitalize tracking-widest font-body">Solde Caisse</th>
-                                <th className="px-6 py-4 text-xs font-medium text-slate-400 capitalize tracking-widest font-body">Dernière Connexion</th>
-                                <th className="px-6 py-4 text-xs font-medium text-slate-400 capitalize tracking-widest font-body">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5">
-                            <tr className="hover:bg-white/5 transition-colors group">
-                                <td className="px-6 py-6">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 flex items-center justify-center text-casino-accent font-bold group-hover:scale-110 transition-transform border border-white/5 rounded-lg">AA</div>
-                                        <div>
-                                            <p className="text-white font-bold">Admin Agent</p>
-                                            <p className="text-xs text-slate-500">+237 ...</p>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="px-6 py-6">
-                                    <span className="px-2 py-1 bg-blue-500/10 text-blue-400 text-[10px] font-medium rounded-full capitalize tracking-tighter">Administrateur</span>
-                                </td>
-                                <td className="px-6 py-6 font-bold text-white">50,000 XAF</td>
-                                <td className="px-6 py-6 text-slate-400 text-sm italic">Il y a 5 min</td>
-                                <td className="px-6 py-6">
-                                    <button className="text-casino-accent hover:text-white transition-colors text-sm font-medium capitalize tracking-widest">Détails</button>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div className="p-10 text-center text-slate-500">
-                        <p>Aucun autre agent enregistré pour le moment.</p>
-                    </div>
-                </div>
-            </main>
+  const openProvision = (agent) => { setSelectedAgent(agent); setProvisionForm({ amount: '', description: '' }); setShowProvisionModal(true); };
+
+  const handleProvision = async (e) => {
+    e.preventDefault(); setError('');
+    try {
+      await axios.post(`/api/agents/${selectedAgent.id}/provision`, { amount: parseInt(provisionForm.amount), description: provisionForm.description || 'Provision caisse backoffice' }, config);
+      setShowProvisionModal(false);
+      setSuccess(`Provision de ${provisionForm.amount} XAF effectuee`); setTimeout(() => setSuccess(''), 3000);
+      fetchAgents();
+    } catch (err) { setError(err.response?.data?.detail || 'Erreur lors de la provision'); }
+  };
+
+  const roleBadge = (role) => {
+    const s = { ADMIN: ['var(--purple)', 'Admin'], SUPER_AGENT: ['var(--blue)', 'Super Agent'], AGENT: ['var(--green)', 'Caissier'] };
+    const [c, l] = s[role] || s.AGENT;
+    return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase" style={{ background: `${c}15`, color: c }}>{l}</span>;
+  };
+
+  const statusBadge = (suspended) => (
+    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase" style={{ background: suspended ? 'var(--red, #ef4444)15' : 'var(--green)15', color: suspended ? 'var(--red)' : 'var(--green)' }}>
+      {suspended ? 'Suspendu' : 'Actif'}
+    </span>
+  );
+
+  const inputStyle = { background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' };
+
+  return (
+    <div className="animate-fade">
+      {success && <div className="mb-4 px-4 py-3 rounded-lg text-sm font-medium" style={{ background: 'var(--green)15', color: 'var(--green)', border: '1px solid var(--green)30' }}>{success}</div>}
+      {error && !showCreateModal && !showProvisionModal && <div className="mb-4 px-4 py-3 rounded-lg text-sm font-medium" style={{ background: 'var(--red)15', color: 'var(--red)', border: '1px solid var(--red)30' }}>{error}</div>}
+
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold font-title" style={{ color: 'var(--text-primary)' }}>Caissiers</h1>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Gerez vos agents et leurs habilitations</p>
         </div>
-    );
+        <button onClick={() => { setShowCreateModal(true); setError(''); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all hover:-translate-y-0.5"
+          style={{ background: 'var(--accent)', color: '#000' }}>
+          <Plus size={16} /> Nouveau Caissier
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)' }}>
+        <table className="w-full text-left">
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+              {['Nom', 'Telephone', 'Role', 'Kiosque', 'Statut', 'Actions'].map(h => (
+                <th key={h} className="px-6 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan="6" className="px-6 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Chargement...</td></tr>
+            ) : agents.length === 0 ? (
+              <tr><td colSpan="6" className="px-6 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Aucun agent enregistre.</td></tr>
+            ) : agents.map(agent => (
+              <tr key={agent.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold" style={{ background: 'var(--accent)', color: '#000' }}>
+                      {agent.display_name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                    </div>
+                    <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{agent.display_name}</span>
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-secondary)' }}>{agent.phone}</td>
+                <td className="px-6 py-4">{roleBadge(agent.role)}</td>
+                <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-secondary)' }}>{agent.kiosk_name || '-'}</td>
+                <td className="px-6 py-4">{statusBadge(agent.is_suspended)}</td>
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => openDetail(agent)} className="p-1.5 rounded-md transition-colors" style={{ color: 'var(--text-muted)' }} title="Details"><Eye size={15} /></button>
+                    <button onClick={() => openProvision(agent)} className="p-1.5 rounded-md transition-colors" style={{ color: 'var(--green)' }} title="Provision"><Wallet size={15} /></button>
+                    <button onClick={() => toggleSuspend(agent)} className="p-1.5 rounded-md transition-colors" style={{ color: agent.is_suspended ? 'var(--green)' : 'var(--red)' }}
+                      title={agent.is_suspended ? 'Reactiver' : 'Suspendre'}>
+                      {agent.is_suspended ? <CheckCircle size={15} /> : <Ban size={15} />}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Create Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="rounded-xl p-6 w-full max-w-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-bold font-title" style={{ color: 'var(--text-primary)' }}>Nouveau Caissier</h3>
+              <button onClick={() => setShowCreateModal(false)} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+            </div>
+            {error && <div className="mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--red)15', color: 'var(--red)' }}>{error}</div>}
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Nom complet *</label>
+                <input type="text" required value={form.display_name} onChange={e => setForm({ ...form, display_name: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm" style={inputStyle} placeholder="Ex: Jean Dupont" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Telephone *</label>
+                <input type="text" required value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm" style={inputStyle} placeholder="+237 6XX XXX XXX" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Mot de passe *</label>
+                <input type="password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm" style={inputStyle} placeholder="Min. 6 caracteres" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Kiosque</label>
+                  <input type="text" value={form.kiosk_name} onChange={e => setForm({ ...form, kiosk_name: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-lg text-sm" style={inputStyle} placeholder="Kiosque A" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Localisation</label>
+                  <input type="text" value={form.kiosk_location} onChange={e => setForm({ ...form, kiosk_location: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-lg text-sm" style={inputStyle} placeholder="Douala, Akwa" />
+                </div>
+              </div>
+              <button type="submit" className="w-full py-3 rounded-lg text-sm font-bold transition-all hover:-translate-y-0.5" style={{ background: 'var(--accent)', color: '#000' }}>
+                Creer le caissier
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {showDetailModal && selectedAgent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="rounded-xl p-6 w-full max-w-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-bold font-title" style={{ color: 'var(--text-primary)' }}>Detail Agent</h3>
+              <button onClick={() => setShowDetailModal(false)} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+            </div>
+            <div className="flex items-center gap-4 mb-5">
+              <div className="w-14 h-14 rounded-xl flex items-center justify-center text-lg font-bold" style={{ background: 'var(--accent)', color: '#000' }}>
+                {selectedAgent.display_name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <p className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{selectedAgent.display_name}</p>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{selectedAgent.phone}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              {[
+                ['Role', selectedAgent.role],
+                ['Solde', agentDetail?.caisse?.balance !== 'N/A' ? `${(agentDetail?.caisse?.balance || 0).toLocaleString()} XAF` : 'N/A'],
+                ['Kiosque', selectedAgent.kiosk_name || '-'],
+                ['Statut', selectedAgent.is_suspended ? 'Suspendu' : 'Actif']
+              ].map(([l, v]) => (
+                <div key={l} className="p-3 rounded-lg" style={{ background: 'var(--bg-base)', border: '1px solid var(--border-subtle)' }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>{l}</p>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{v}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => { setShowDetailModal(false); openProvision(selectedAgent); }}
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2" style={{ background: 'var(--green)15', color: 'var(--green)' }}>
+                <Wallet size={16} /> Provisionner
+              </button>
+              <button onClick={() => toggleSuspend(selectedAgent)}
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2"
+                style={{ background: selectedAgent.is_suspended ? 'var(--green)15' : 'var(--red)15', color: selectedAgent.is_suspended ? 'var(--green)' : 'var(--red)' }}>
+                {selectedAgent.is_suspended ? <><CheckCircle size={16} /> Reactiver</> : <><Ban size={16} /> Suspendre</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Provision Modal */}
+      {showProvisionModal && selectedAgent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="rounded-xl p-6 w-full max-w-md" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-bold font-title" style={{ color: 'var(--text-primary)' }}>Provision Caisse</h3>
+              <button onClick={() => setShowProvisionModal(false)} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+            </div>
+            <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>Agent : <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{selectedAgent.display_name}</span></p>
+            {error && <div className="mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--red)15', color: 'var(--red)' }}>{error}</div>}
+            <form onSubmit={handleProvision} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Montant (XAF) *</label>
+                <input type="number" required value={provisionForm.amount} onChange={e => setProvisionForm({ ...provisionForm, amount: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm" style={inputStyle} placeholder="Positif = depot, Negatif = retrait" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Description</label>
+                <input type="text" value={provisionForm.description} onChange={e => setProvisionForm({ ...provisionForm, description: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm" style={inputStyle} placeholder="Ex: Depot du matin" />
+              </div>
+              <div className="flex gap-3">
+                <button type="submit" className="flex-1 py-2.5 rounded-lg text-sm font-bold" style={{ background: 'var(--accent)', color: '#000' }}>Valider</button>
+                <button type="button" onClick={() => setShowProvisionModal(false)} className="flex-1 py-2.5 rounded-lg text-sm font-semibold" style={{ background: 'var(--bg-base)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}>Annuler</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default Agents;

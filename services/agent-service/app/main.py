@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Header
+import logging
+from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import bcrypt
@@ -6,24 +7,20 @@ import os
 from datetime import datetime
 from uuid import UUID
 
+logger = logging.getLogger("agent-service")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
 from .database import get_db
 from .models import Agent, CashRegister, CashRegisterTransaction, CashTxType
 from .schemas import AgentCreate, AgentResponse, ProvisionRequest, AgentUpdate, AgentListResponse, LoginRequest
-from .security import create_access_token
+from .security import create_access_token, get_current_agent_id, verify_admin_key
 
 app = FastAPI(
-    title="Roisbet Agent & Cash Service",
+    title="AGDTech Agent & Cash Service",
     root_path=os.getenv("ROOT_PATH", "")
 )
 
-# --- RÉCUPÉRATION DE LA CLÉ ADMIN ---
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
-
-def verify_admin_key(x_api_key: str = Header(None)):
-    """Vérifie que la requête vient bien du Backoffice autorisé"""
-    if x_api_key != ADMIN_API_KEY:
-        raise HTTPException(status_code=403, detail="Accès refusé : Clé Admin invalide.")
-    return x_api_key
+# verify_admin_key et get_current_agent_id importés depuis security.py
 
 from sqlalchemy import func
 
@@ -36,6 +33,69 @@ async def get_agent_stats(db: AsyncSession = Depends(get_db)):
     return {
         "active_agents": count_agents
     }
+
+@app.get("/admin/transactions", dependencies=[Depends(verify_admin_key)])
+async def get_all_transactions(skip: int = 0, limit: int = 50, db: AsyncSession = Depends(get_db)):
+    """Liste toutes les transactions de caisse (Reserve au Backoffice)"""
+    result = await db.execute(
+        select(CashRegisterTransaction, Agent.display_name)
+        .join(Agent, CashRegisterTransaction.agent_id == Agent.id)
+        .order_by(CashRegisterTransaction.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = result.all()
+
+    transactions = []
+    for tx, agent_name in rows:
+        transactions.append({
+            "id": str(tx.id),
+            "agent_id": str(tx.agent_id),
+            "agent_name": agent_name,
+            "tx_type": tx.tx_type.value,
+            "amount": tx.amount,
+            "balance_before": tx.balance_before,
+            "balance_after": tx.balance_after,
+            "reference": tx.reference,
+            "description": tx.description,
+            "created_at": str(tx.created_at) if tx.created_at else None
+        })
+    return transactions
+
+@app.get("/admin/{agent_id}", dependencies=[Depends(verify_admin_key)])
+async def get_agent_details_admin(agent_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Detail d'un agent avec sa caisse (Reserve au Backoffice)"""
+    result = await db.execute(
+        select(Agent, CashRegister)
+        .join(CashRegister, Agent.id == CashRegister.agent_id)
+        .where(Agent.id == agent_id)
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Agent introuvable")
+
+    agent, caisse = row
+    return {
+        "agent": AgentResponse.model_validate(agent),
+        "caisse": {
+            "balance": caisse.balance,
+            "created_at": str(caisse.created_at) if caisse.created_at else None
+        }
+    }
+
+@app.patch("/admin/{agent_id}", response_model=AgentResponse, dependencies=[Depends(verify_admin_key)])
+async def update_agent_admin(agent_id: UUID, update_data: AgentUpdate, db: AsyncSession = Depends(get_db)):
+    """Met a jour un agent (Reserve au Backoffice)"""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalars().first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent introuvable")
+    update_dict = update_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(agent, key, value)
+    await db.commit()
+    await db.refresh(agent)
+    return agent
 
 @app.get("/status", tags=["Health"])
 async def health_check():
@@ -83,7 +143,7 @@ async def register_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_d
 # ---------------------------------------------------------
 # ROUTE 1 : CRÉER UN AGENT (Et sa caisse automatique)
 # ---------------------------------------------------------
-@app.post("/", response_model=AgentResponse)
+@app.post("/", response_model=AgentResponse, dependencies=[Depends(verify_admin_key)])
 async def create_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_db)):
     # 1. Vérifier si le téléphone existe déjà
     result = await db.execute(select(Agent).where(Agent.phone == agent_in.phone))
@@ -116,13 +176,15 @@ async def create_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_db)
     # 5. Valider la transaction (Atomicité garantie)
     await db.commit()
     await db.refresh(new_agent)
-    
+
+    logger.info(f"AGENT_CREATED id={new_agent.id} phone={new_agent.phone} name={new_agent.display_name}")
+
     return new_agent
 
 # ---------------------------------------------------------
 # ROUTE 2 : APPROVISIONNER LA CAISSE D'UN AGENT
 # ---------------------------------------------------------
-@app.post("/{agent_id}/provision")
+@app.post("/{agent_id}/provision", dependencies=[Depends(verify_admin_key)])
 async def provision_cash(agent_id: UUID, req: ProvisionRequest, db: AsyncSession = Depends(get_db)):
     # 1. Chercher la caisse avec un verrouillage de ligne (FOR UPDATE) pour éviter les conflits
     result = await db.execute(
@@ -145,10 +207,17 @@ async def provision_cash(agent_id: UUID, req: ProvisionRequest, db: AsyncSession
         else:
             tx_type = CashTxType.PROVISION
 
-    # 3. Mettre à jour le solde
+    # 3. Vérifier que le solde ne deviendra pas négatif
+    if req.amount < 0 and caisse.balance < abs(req.amount):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Solde insuffisant. Solde actuel : {caisse.balance} XAF, débit demandé : {abs(req.amount)} XAF"
+        )
+
+    # 4. Mettre à jour le solde
     caisse.balance += req.amount
-    
-    # 4. Créer la trace d'audit (Transaction)
+
+    # 5. Créer la trace d'audit (Transaction)
     transaction = CashRegisterTransaction(
         cash_register_id=caisse.id,
         agent_id=agent_id,
@@ -159,11 +228,18 @@ async def provision_cash(agent_id: UUID, req: ProvisionRequest, db: AsyncSession
         description=req.description
     )
     db.add(transaction)
-    
-    await db.commit()
-    
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"PROVISION_FAILED agent={agent_id} amount={req.amount} error={e}")
+        raise HTTPException(status_code=500, detail="Erreur lors de la sauvegarde de la transaction.")
+
+    logger.info(f"PROVISION agent={agent_id} type={tx_type.value} amount={req.amount} before={balance_before} after={caisse.balance}")
+
     return {
-        "status": "success", 
+        "status": "success",
         "message": f"Caisse approvisionnée de {req.amount} XAF",
         "new_balance": caisse.balance
     }
@@ -172,7 +248,7 @@ async def provision_cash(agent_id: UUID, req: ProvisionRequest, db: AsyncSession
 # ---------------------------------------------------------
 # ROUTE 3 : LIRE TOUS LES AGENTS (Read)
 # ---------------------------------------------------------
-@app.get("/", response_model=list[AgentResponse])
+@app.get("/", response_model=list[AgentResponse], dependencies=[Depends(verify_admin_key)])
 async def get_agents(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Agent).offset(skip).limit(limit))
     agents = result.scalars().all()
@@ -182,7 +258,7 @@ async def get_agents(skip: int = 0, limit: int = 100, db: AsyncSession = Depends
 # ROUTE 4 : LIRE UN AGENT ET SA CAISSE (Read)
 # ---------------------------------------------------------
 @app.get("/{agent_id}")
-async def get_agent_details(agent_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_agent_details(agent_id: UUID, db: AsyncSession = Depends(get_db), current_agent: str = Depends(get_current_agent_id)):
     # On charge l'agent ET sa caisse en une seule requête
     result = await db.execute(
         select(Agent, CashRegister)
@@ -206,7 +282,7 @@ async def get_agent_details(agent_id: UUID, db: AsyncSession = Depends(get_db)):
 # ROUTE 5 : METTRE À JOUR OU SUSPENDRE UN AGENT (Update / Soft Delete)
 # ---------------------------------------------------------
 @app.patch("/{agent_id}", response_model=AgentResponse)
-async def update_agent(agent_id: UUID, update_data: AgentUpdate, db: AsyncSession = Depends(get_db)):
+async def update_agent(agent_id: UUID, update_data: AgentUpdate, db: AsyncSession = Depends(get_db), current_agent: str = Depends(get_current_agent_id)):
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalars().first()
     

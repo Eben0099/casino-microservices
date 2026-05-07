@@ -8,7 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import redis.asyncio as redis
 
 app = FastAPI(
-    title="Roisbet Display Service",
+    title="AGDTech Display Service",
     root_path=os.getenv("ROOT_PATH", "")
 )
 

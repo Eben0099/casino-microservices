@@ -3,8 +3,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 
-# On récupère le secret depuis le docker-compose
-SECRET_KEY = os.getenv("JWT_SECRET", "secret_par_defaut")
+SECRET_KEY = os.getenv("JWT_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET environment variable is required")
 ALGORITHM = "HS256"
 
 # Ce "schéma" indique à FastAPI et Swagger qu'on attend un Bearer Token
@@ -33,8 +34,9 @@ async def get_current_agent_id(credentials: HTTPAuthorizationCredentials = Depen
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-# --- RÉCUPÉRATION DE LA CLÉ ADMIN ---
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+if not ADMIN_API_KEY:
+    raise RuntimeError("ADMIN_API_KEY environment variable is required")
 
 from fastapi import Header
 

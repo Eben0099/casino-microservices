@@ -39,12 +39,12 @@ services:
     environment:
       POSTGRES_USER: casino_admin
       POSTGRES_PASSWORD: super_secret_password
-      # Base de données par défaut (on en créera d'autres plus tard)
-      POSTGRES_DB: casino_agent_db 
+      POSTGRES_DB: casino_agent_db
     # ports:
     #   - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
     networks:
       - casino_network
 
@@ -63,10 +63,12 @@ services:
   # 4. Le Microservice Agent (Anciennement Wallet)
   # --------------------------------------------------------
   agent-service:
-    build: 
+    build:
       context: ./services/agent-service
     container_name: casino_agent_api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "sleep 10 && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      - postgres
     networks:
       - casino_network
     environment:
@@ -86,15 +88,19 @@ services:
   # 5. Le Microservice Ticket
   # --------------------------------------------------------
   ticket-service:
-    build: 
+    build:
       context: ./services/ticket-service
     container_name: casino_ticket_api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "sleep 10 && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      - postgres
+      - redis
     networks:
       - casino_network
     environment:
       - REDIS_URL=redis://casino_redis:6379/0
       - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
+      - ADMIN_API_KEY=CleSuperSecreteBackoffice2026
       - ROOT_PATH=/api/tickets
     volumes:
       - ./services/ticket-service:/app
@@ -109,10 +115,13 @@ services:
   # 6. Moteur de Roulette (State Machine + Redis)
   # --------------------------------------------------------
   game-roulette-service:
-    build: 
+    build:
       context: ./services/game-roulette-service
     container_name: casino_roulette_engine
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "sleep 10 && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      - postgres
+      - redis
     networks:
       - casino_network
     environment:

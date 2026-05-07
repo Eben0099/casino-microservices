@@ -1,4 +1,5 @@
-import httpx 
+import logging
+import httpx
 import asyncio
 import random
 import string
@@ -7,6 +8,9 @@ import os
 import redis.asyncio as redis
 from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException
+
+logger = logging.getLogger("ticket-service")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -20,7 +24,7 @@ from .security import get_current_agent_id, verify_admin_key
 from sqlalchemy import func
 
 app = FastAPI(
-    title="Roisbet Ticket Service",
+    title="AGDTech Ticket Service",
     root_path=os.getenv("ROOT_PATH", "")
 )
 
@@ -46,7 +50,7 @@ async def shutdown_event():
 
 async def listen_to_roulette_results():
     """Tâche de fond qui écoute les résultats et paye les tickets"""
-    print("🎧 Ticket Service en écoute des résultats de la roulette...")
+    logger.info("Ticket Service en ecoute des resultats de la roulette...")
     pubsub = redis_client.pubsub()
     await pubsub.subscribe("roulette-events")
 
@@ -59,7 +63,7 @@ async def listen_to_roulette_results():
                 round_id = data["round_id"]
                 winning_number = data["winning_number"]
                 
-                print(f"💰 [SETTLEMENT] Résolution des paris pour le {round_id} (Gagnant: {winning_number})")
+                logger.info(f"SETTLEMENT round={round_id} winning_number={winning_number}")
                 await process_settlement(round_id, winning_number)
 
 async def process_settlement(round_id: str, winning_number: str):
@@ -75,32 +79,41 @@ async def process_settlement(round_id: str, winning_number: str):
         tickets_to_process = result.scalars().all()
 
         if not tickets_to_process:
-            print(f"   -> Aucun ticket en attente pour le {round_id}.")
+            logger.info(f"SETTLEMENT round={round_id} no_pending_tickets")
             return
 
+        processed = 0
         for ticket in tickets_to_process:
-            total_payout = 0
-            ticket.winning_number = str(winning_number)
-            
-            # 2. On calcule le gain de chaque ligne de pari
-            for bet in ticket.bets:
-                payout = calculate_payout(bet.bet_type, bet.bet_target, bet.amount, winning_number)
-                bet.payout = payout
-                bet.is_winning = (payout > 0)
-                total_payout += payout
+            try:
+                total_payout = 0
+                ticket.winning_number = str(winning_number)
 
-            # 3. On détermine le nouveau statut du ticket
-            new_status = TicketStatus.WON if total_payout > 0 else TicketStatus.LOST
-            
-            # 4. On met à jour le ticket
-            ticket.status = new_status
-            ticket.total_payout = total_payout
-            
-            print(f"   -> Ticket {ticket.short_code} : {new_status.value} (Gagnant: {winning_number}) | Gain : {total_payout} XAF")
+                # 2. On calcule le gain de chaque ligne de pari
+                for bet in ticket.bets:
+                    payout = calculate_payout(bet.bet_type, bet.bet_target, bet.amount, winning_number)
+                    bet.payout = payout
+                    bet.is_winning = (payout > 0)
+                    total_payout += payout
+
+                # 3. On détermine le nouveau statut du ticket
+                new_status = TicketStatus.WON if total_payout > 0 else TicketStatus.LOST
+
+                # 4. On met à jour le ticket
+                ticket.status = new_status
+                ticket.total_payout = total_payout
+                processed += 1
+
+                logger.info(f"SETTLEMENT ticket={ticket.short_code} status={new_status.value} payout={total_payout}")
+            except Exception as e:
+                logger.error(f"SETTLEMENT_ERROR ticket={ticket.short_code} error={e}")
 
         # 5. On sauvegarde tout en une seule transaction
-        await db.commit()
-        print(f"✅ [SETTLEMENT] {len(tickets_to_process)} tickets traités avec succès.")
+        try:
+            await db.commit()
+            logger.info(f"SETTLEMENT_COMPLETE round={round_id} tickets_processed={processed}")
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"SETTLEMENT_COMMIT_FAILED round={round_id} error={e}")
 
 @app.get("/admin/stats", dependencies=[Depends(verify_admin_key)])
 async def get_admin_stats(db: AsyncSession = Depends(get_db)):
@@ -226,31 +239,34 @@ async def create_ticket(
         db.add(new_bet)
         
     # 5. COMMUNICATION INTER-SERVICES : Mettre à jour la caisse de l'agent
-    # On utilise le nom du conteneur "agent-service" défini dans docker-compose
     agent_url = f"http://agent-service:8000/{ticket_in.agent_id}/provision"
-    
+    admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
+
     async with httpx.AsyncClient() as client:
         try:
-            # On utilise le même endpoint de provisioning pour "débiter" (montant positif car on ajoute à la caisse de l'agent)
             response = await client.post(
                 agent_url,
                 json={
-                    "amount": total_wager, 
-                    "description": f"Vente Ticket {short_code}"
+                    "amount": total_wager,
+                    "tx_type": "BET_RECEIVED",
+                    "description": f"Vente Ticket {short_code}",
+                    "reference": short_code
                 },
+                headers={"X-API-Key": admin_key},
                 timeout=5.0
             )
             response.raise_for_status()
         except httpx.HTTPError:
-            # Si l'agent-service est injoignable ou erreur, rollback automatique.
             raise HTTPException(
-                status_code=503, 
+                status_code=503,
                 detail="Le service de caisse est indisponible ou n'a pas pu traiter la mise."
             )
 
     # 6. Finalisation
     await db.commit()
-    
+
+    logger.info(f"TICKET_CREATED code={short_code} agent={ticket_in.agent_id} wager={total_wager} round={ticket_in.round_id} bets={len(ticket_in.bets)}")
+
     # Recharge avec relations (bets) pour la réponse JSON (INDISPENSABLE en async)
     result = await db.execute(
         select(Ticket)
@@ -303,17 +319,20 @@ async def payout_ticket(
         raise HTTPException(status_code=400, detail="Ce ticket n'a aucun gain à payer.")
 
     # 3. Appeler agent-service pour enregistrer le décaissement
-    # On envoie un montant NÉGATIF pour soustraire de la caisse
     agent_url = f"http://agent-service:8000/{ticket.agent_id}/provision"
-    
+    admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
                 agent_url,
                 json={
-                    "amount": -ticket.total_payout, # Débit
-                    "description": f"Paiement Gain Ticket {short_code}"
+                    "amount": -ticket.total_payout,
+                    "tx_type": "PAYOUT",
+                    "description": f"Paiement Gain Ticket {short_code}",
+                    "reference": short_code
                 },
+                headers={"X-API-Key": admin_key},
                 timeout=5.0
             )
             response.raise_for_status()
@@ -323,5 +342,7 @@ async def payout_ticket(
     # 4. Mettre à jour le statut
     ticket.status = TicketStatus.PAID
     await db.commit()
-    
+
+    logger.info(f"TICKET_PAID code={short_code} agent={ticket.agent_id} payout={ticket.total_payout}")
+
     return {"status": "success", "message": f"Ticket {short_code} payé : {ticket.total_payout} XAF"}

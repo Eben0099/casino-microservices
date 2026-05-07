@@ -1,50 +1,44 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider } from './contexts/ThemeContext';
+import Layout from './components/Layout';
 
-// Pages
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Agents from './pages/Agents';
+import Transactions from './pages/Transactions';
+import Roulette from './pages/Roulette';
+import Parametres from './pages/Parametres';
 
-// Guard pour protéger les routes
 const ProtectedRoute = ({ children }) => {
   const isAuth = localStorage.getItem('admin_key') === 'CleSuperSecreteBackoffice2026';
-  if (!isAuth) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!isAuth) return <Navigate to="/login" replace />;
   return children;
 };
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Route publique */}
-        <Route path="/login" element={<Login />} />
+    <ThemeProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Public */}
+          <Route path="/login" element={<Login />} />
 
-        {/* Routes protégées */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/agents"
-          element={
-            <ProtectedRoute>
-              <Agents />
-            </ProtectedRoute>
-          }
-        />
+          {/* Protected — Layout with Outlet */}
+          <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/roulette" element={<Roulette />} />
+            <Route path="/agents" element={<Agents />} />
+            <Route path="/transactions" element={<Transactions />} />
+            <Route path="/parametres" element={<Parametres />} />
+          </Route>
 
-        {/* Redirections */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </BrowserRouter>
+          {/* Redirections */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
 

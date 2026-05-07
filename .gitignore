@@ -31,3 +31,9 @@ yarn-error.log*
 .idea/
 .vscode/
 .gemini/
+.claude/
+
+# --- PLAYWRIGHT / DEV ARTIFACTS ---
+.playwright-mcp/
+playwright-report/
+test-results/

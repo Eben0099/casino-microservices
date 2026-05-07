@@ -16,8 +16,11 @@ class AgentResponse(BaseModel):
     phone: str
     display_name: str
     kiosk_name: Optional[str]
+    kiosk_location: Optional[str]
     role: AgentRole
-    
+    is_active: bool = True
+    is_suspended: bool = False
+
     class Config:
         from_attributes = True
 

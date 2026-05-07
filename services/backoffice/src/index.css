@@ -2,10 +2,102 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Un fond global sombre par défaut */
+/* ═══════ LIGHT MODE (default) ═══════ */
+:root {
+  --bg-base:       #f4f5f7;
+  --bg-surface:    #ffffff;
+  --bg-elevated:   #ffffff;
+  --bg-sidebar:    #0f172a;
+  --bg-sidebar-hover: #1e293b;
+  --bg-sidebar-active: #1a2744;
+
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+
+  --text-primary:   #0f172a;
+  --text-secondary: #64748b;
+  --text-muted:     #94a3b8;
+  --text-on-dark:   #f8fafc;
+
+  --accent:       #f59e0b;
+  --accent-hover: #d97706;
+  --accent-light: #fef3c7;
+
+  --green:  #10b981;
+  --red:    #ef4444;
+  --blue:   #3b82f6;
+  --purple: #8b5cf6;
+
+  --roulette-red:   #ef4444;
+  --roulette-black: #1e293b;
+  --roulette-green: #10b981;
+
+  --chart-1: #f59e0b;
+  --chart-2: #3b82f6;
+  --chart-3: #10b981;
+  --chart-4: #8b5cf6;
+  --chart-5: #ef4444;
+  --chart-6: #06b6d4;
+
+  --sidebar-w: 240px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
+  --radius: 10px;
+}
+
+/* ═══════ DARK MODE ═══════ */
+.dark {
+  --bg-base:       #0d1117;
+  --bg-surface:    #161b22;
+  --bg-elevated:   #1c2230;
+  --bg-sidebar:    #090d14;
+  --bg-sidebar-hover: #1a2236;
+  --bg-sidebar-active: #1f2a3f;
+
+  --border-subtle: #21262d;
+  --border-strong: #30363d;
+
+  --text-primary:   #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted:     #6e7681;
+  --text-on-dark:   #e6edf3;
+
+  --accent-light: #422006;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.4);
+}
+
+/* ═══════ BASE ═══════ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
 body {
-  background-color: #0f172a;
-  color: #f8fafc;
-  margin: 0;
-  @apply font-body;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Raleway', sans-serif;
+}
+
+/* ═══════ SCROLLBAR ═══════ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ═══════ ANIMATIONS ═══════ */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade { animation: fadeIn 0.3s ease forwards; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }

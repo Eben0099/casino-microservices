@@ -10,12 +10,12 @@ import redis.asyncio as redis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends
 from sqlalchemy import select
 
-from .database import engine, Base, SessionLocal
+from .database import engine, SessionLocal
 from .models import RouletteRound
 from .rules import get_number_properties, calculate_stats
 
 app = FastAPI(
-    title="Roisbet Roulette Engine",
+    title="AGDTech Roulette Engine",
     root_path=os.getenv("ROOT_PATH", "")
 )
 
@@ -77,9 +77,6 @@ async def startup_event():
     redis_url = os.getenv("REDIS_URL", "redis://casino_redis:6379/0")
     redis_client = redis.from_url(redis_url, decode_responses=True)
     
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        
     asyncio.create_task(game_loop())
 
 @app.on_event("shutdown")
@@ -111,8 +108,7 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
         "serverTime": time.time(),
         "gameId": round_id,
         "phase": phase,
-        "duration": duration,
-        "phaseStartedAt": current_game_state["started_at"]
+        "duration": duration
     })
     
     # Optional fallback for other microservices via Redis
@@ -123,8 +119,7 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
             "serverTime": time.time(),
             "gameId": round_id,
             "phase": phase,
-            "duration": duration,
-            "phaseStartedAt": current_game_state["started_at"]
+            "duration": duration
         }))
 
 async def game_loop():
