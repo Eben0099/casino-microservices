@@ -1,15 +1,40 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouletteWs } from '../hooks/useRouletteWs';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { Radio, Flame, Snowflake } from 'lucide-react';
+
+function useElementWidth() {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width || 0;
+      setWidth(Math.floor(w));
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width];
+}
+
+const ChartBox = ({ height = 200, children }) => {
+  const [ref, width] = useElementWidth();
+  return (
+    <div ref={ref} style={{ width: '100%', height }}>
+      {width > 0 && children(width, height)}
+    </div>
+  );
+};
 
 const RED_NUMBERS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
 const getColor = (n) => n === 0 ? 'var(--roulette-green)' : RED_NUMBERS.includes(n) ? 'var(--roulette-red)' : 'var(--roulette-black)';
 const getColorHex = (n) => n === 0 ? '#10b981' : RED_NUMBERS.includes(n) ? '#ef4444' : '#1e293b';
 const getLabel = (n) => n === 0 ? 'Vert' : RED_NUMBERS.includes(n) ? 'Rouge' : 'Noir';
+const getLabelColor = (n) => n === 0 ? '#10b981' : RED_NUMBERS.includes(n) ? '#ef4444' : 'var(--text-primary)';
 
 const Card = ({ title, children, className = '' }) => (
-  <div className={`rounded-xl p-5 ${className}`} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)' }}>
+  <div className={`rounded-xl p-5 min-w-0 ${className}`} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)' }}>
     {title && <h3 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: 'var(--text-muted)' }}>{title}</h3>}
     {children}
   </div>
@@ -60,10 +85,8 @@ function Roulette() {
 
   const interpolate = (val) => {
     const ratio = maxFreq === minFreq ? 0.5 : (val - minFreq) / (maxFreq - minFreq);
-    const r = Math.round(245 * (1 - ratio) + 245 * ratio);
-    const g = Math.round(245 * (1 - ratio) + 158 * ratio);
-    const b = Math.round(245 * (1 - ratio) + 11 * ratio);
-    return `rgb(${r},${g},${b})`;
+    const alpha = 0.12 + ratio * 0.88;
+    return `rgba(245, 158, 11, ${alpha})`;
   };
 
   return (
@@ -100,16 +123,16 @@ function Roulette() {
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card title="Couleurs">
-            <div className="flex items-center justify-center" style={{ height: 180 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+            <ChartBox height={180}>
+              {(w, h) => (
+                <PieChart width={w} height={h}>
                   <Pie data={colorData} dataKey="value" cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} strokeWidth={0}>
                     {colorData.map((d, i) => <Cell key={i} fill={d.fill} />)}
                   </Pie>
                   <Tooltip formatter={(v) => `${v.toFixed(1)}%`} />
                 </PieChart>
-              </ResponsiveContainer>
-            </div>
+              )}
+            </ChartBox>
             <div className="flex justify-center gap-4 mt-2">
               {colorData.map(d => (
                 <div key={d.name} className="flex items-center gap-1.5 text-xs">
@@ -158,28 +181,28 @@ function Roulette() {
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card title="Douzaines">
-            <div style={{ height: 200 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dozensData} barSize={40}>
+            <ChartBox height={200}>
+              {(w, h) => (
+                <BarChart width={w} height={h} data={dozensData} barSize={40}>
                   <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} domain={[0, 50]} />
                   <Tooltip formatter={(v) => `${v.toFixed(1)}%`} />
                   <Bar dataKey="value" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+              )}
+            </ChartBox>
           </Card>
           <Card title="Colonnes">
-            <div style={{ height: 200 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={columnsData} barSize={40}>
+            <ChartBox height={200}>
+              {(w, h) => (
+                <BarChart width={w} height={h} data={columnsData} barSize={40}>
                   <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} domain={[0, 50]} />
                   <Tooltip formatter={(v) => `${v.toFixed(1)}%`} />
                   <Bar dataKey="value" fill="var(--chart-2)" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+              )}
+            </ChartBox>
           </Card>
         </div>
       )}
@@ -226,7 +249,7 @@ function Roulette() {
               <div key={n} className="relative group">
                 <div
                   className="aspect-square rounded-lg flex flex-col items-center justify-center cursor-default transition-transform hover:scale-110"
-                  style={{ background: interpolate(freq), color: freq > (maxFreq * 0.6) ? '#000' : 'var(--text-primary)' }}
+                  style={{ background: interpolate(freq), color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
                 >
                   <span className="text-xs font-bold">{n}</span>
                   <span className="text-[9px] opacity-70">{freq}</span>
@@ -254,7 +277,7 @@ function Roulette() {
                   <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td className="px-4 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>{last50.length - i}</td>
                     <td className="px-4 py-2"><NumberPill n={r.number} size="sm" /></td>
-                    <td className="px-4 py-2 text-sm" style={{ color: getColorHex(r.number) }}>{getLabel(r.number)}</td>
+                    <td className="px-4 py-2 text-sm font-medium" style={{ color: getLabelColor(r.number) }}>{getLabel(r.number)}</td>
                     <td className="px-4 py-2 text-sm" style={{ color: 'var(--text-secondary)' }}>{r.number === 0 ? '-' : r.isEven ? 'Pair' : 'Impair'}</td>
                     <td className="px-4 py-2 text-sm" style={{ color: 'var(--text-secondary)' }}>{r.number === 0 ? '-' : r.number <= 12 ? '1ere' : r.number <= 24 ? '2eme' : '3eme'}</td>
                   </tr>

@@ -37,3 +37,5 @@ yarn-error.log*
 .playwright-mcp/
 playwright-report/
 test-results/
+phase*.png
+*.screenshot.png
