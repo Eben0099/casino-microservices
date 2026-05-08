@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, X } from 'lucide-react';
 
 const BET_LABELS = {
@@ -34,6 +35,14 @@ const getNumberColor = (n) => {
 };
 
 const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain = false }) => {
+  // ESC ferme le modal
+  useEffect(() => {
+    if (!ticket || !onClose) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ticket, onClose]);
+
   if (!ticket) return null;
 
   const isResolved = ticket.status !== 'PENDING';
@@ -52,27 +61,53 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
   // Barcode-like visual from short_code
   const barcodeChars = (ticket.short_code || '').replace(/[^A-Z0-9]/g, '');
 
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)'
-    }}>
-      <div className="animate-fade" style={{ position: 'relative', width: '380px', maxHeight: '90vh', overflowY: 'auto' }}>
-        {/* Close button */}
-        <button onClick={onClose} style={{
-          position: 'absolute', top: '-12px', right: '-12px', zIndex: 10,
-          background: '#334155', border: 'none', borderRadius: '50%',
-          width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', color: '#fff'
-        }}>
-          <X size={16} />
-        </button>
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)',
+        padding: '5vh 16px',
+      }}
+    >
+      {/* Close button — fixed top-right of the viewport, always reachable */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose && onClose(); }}
+        title="Fermer (Échap)"
+        aria-label="Fermer"
+        style={{
+          position: 'fixed', top: 16, right: 16, zIndex: 1100,
+          background: 'var(--accent)', color: 'var(--text-on-accent)',
+          border: 'none', borderRadius: '50%',
+          width: 44, height: 44,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+          fontWeight: 700,
+        }}
+      >
+        <X size={22} strokeWidth={2.5} />
+      </button>
 
+      <div
+        className="animate-fade"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'relative',
+          width: 'min(420px, 100%)',
+          height: '90vh',
+          maxHeight: '90vh',
+          display: 'flex', flexDirection: 'column', gap: 12,
+        }}
+      >
         {/* Ticket receipt */}
         <div id="ticket-receipt" style={{
+          flex: '1 1 auto',
+          minHeight: 0,
+          overflowY: 'auto',
           background: '#faf9f6', color: '#1a1a1a', borderRadius: '12px',
-          overflow: 'hidden', fontFamily: "'Inter', monospace",
+          fontFamily: "'Inter', monospace",
           boxShadow: '0 25px 50px rgba(0,0,0,0.5)'
         }}>
           {/* Top zigzag edge */}
@@ -288,18 +323,29 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
           }} />
         </div>
 
-        {/* Print button below ticket */}
-        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'center' }}>
+        {/* Action bar below ticket — flex-shrink: 0 pour ne pas etre pousse hors viewport */}
+        <div style={{
+          flexShrink: 0,
+          display: 'flex', gap: 8, justifyContent: 'center',
+        }}>
           <button onClick={handlePrint} style={{
-            background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff', padding: '10px 24px', borderRadius: '8px', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '600'
+            background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.25)',
+            color: '#fff', padding: '12px 22px', borderRadius: 8, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600,
           }}>
             <Printer size={16} /> Imprimer
           </button>
+          <button onClick={onClose} style={{
+            background: 'var(--accent)', border: 'none',
+            color: 'var(--text-on-accent)', padding: '12px 28px', borderRadius: 8, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 800,
+          }}>
+            <X size={16} /> Fermer
+          </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
