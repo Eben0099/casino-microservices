@@ -65,13 +65,14 @@ resource "aws_lb_target_group" "web" {
 # 4bis. Le groupe cible (Target Group) pour l'interface Agent Web
 resource "aws_lb_target_group" "agent_web" {
   name        = "casino-tg-agent-web"
-  port        = 5173 
+  port        = 5173
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
   health_check {
-    path                = "/agents/pos"
+    path                = "/agents/pos/"   # trailing slash exige par Vite (base=/agents/pos/)
+    matcher             = "200-399"        # accepte aussi les redirects que Vite peut renvoyer
     healthy_threshold   = 2
     unhealthy_threshold = 10
     timeout             = 5
