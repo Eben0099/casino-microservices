@@ -134,27 +134,7 @@ services:
       - "traefik.http.services.roulette.loadbalancer.server.port=8000"
 
   # --------------------------------------------------------
-  # 7. Relais Temps Réel : Display Service (WebSocket)
-  # --------------------------------------------------------
-  display-service:
-    build: 
-      context: ./services/display-service
-    container_name: casino_display_api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    networks:
-      - casino_network
-    environment:
-      - REDIS_URL=redis://casino_redis:6379/0
-    volumes:
-      - ./services/display-service:/app
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.display.entrypoints=web"
-      - "traefik.http.routers.display.rule=PathPrefix(`/api/display`) || PathPrefix(`/ws/display`)"
-      - "traefik.http.services.display.loadbalancer.server.port=8000"
-
-  # --------------------------------------------------------
-  # 8. Interface d'Administration : Backoffice (React)
+  # 7. Interface d'Administration : Backoffice (React)
   # --------------------------------------------------------
   backoffice-web:
     build: 

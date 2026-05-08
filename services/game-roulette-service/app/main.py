@@ -291,7 +291,6 @@ async def game_loop():
             await asyncio.sleep(5)
 
 @app.websocket("/ws/roulette")
-@app.websocket("/api/display/ws/roulette")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:

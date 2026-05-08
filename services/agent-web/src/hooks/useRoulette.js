@@ -16,7 +16,7 @@ export const useRoulette = () => {
 
     const connect = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${window.location.host}/api/display/ws/roulette`);
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws/roulette`);
 
       ws.onmessage = (event) => {
         try {

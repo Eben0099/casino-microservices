@@ -39,7 +39,7 @@ jobs:
     - name: 🛠️ Build, Tag, et Push des images (ARM64)
       run: |
         # Liste des services à traiter
-        services=("agent-service" "display-service" "game-roulette-service" "ticket-service")
+        services=("agent-service" "game-roulette-service" "ticket-service")
 
         for service in "${services[@]}"; do
           echo "🏁 Traitement du service : $service"

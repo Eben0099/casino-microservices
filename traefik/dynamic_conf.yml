@@ -24,15 +24,8 @@ http:
         - web
 
     roulette-ws-router:
-      rule: "PathPrefix(`/ws/roulette`) || PathPrefix(`/api/display/ws/roulette`)"
+      rule: "PathPrefix(`/ws/roulette`)"
       service: roulette-service
-      priority: 100
-      entryPoints:
-        - web
-
-    display-router:
-      rule: "PathPrefix(`/api/display`) || PathPrefix(`/ws/display`)"
-      service: display-service
       priority: 100
       entryPoints:
         - web
@@ -77,11 +70,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://casino_roulette_engine:8000"
-
-    display-service:
-      loadBalancer:
-        servers:
-          - url: "http://casino_display_api:8000"
 
     agent-web-service:
       loadBalancer:

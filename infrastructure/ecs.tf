@@ -27,15 +27,6 @@ locals {
         { name = "ROOT_PATH",          value = "/api/agents" }
       ]
     }
-    "display-service" = {
-      path           = "/api/display*"
-      repository_url = aws_ecr_repository.display_service.repository_url
-      env = [
-        { name = "REDIS_URL",     value = local.redis_url },
-        { name = "ADMIN_API_KEY", value = local.admin_api_key },
-        { name = "ROOT_PATH",     value = "/api/display" }
-      ]
-    }
     "game-roulette-service" = {
       path           = "/api/roulette*"
       repository_url = aws_ecr_repository.game_service.repository_url
