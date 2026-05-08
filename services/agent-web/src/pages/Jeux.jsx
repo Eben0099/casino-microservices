@@ -7,6 +7,7 @@ import BettingGrid from '../components/BettingGrid';
 import BetSlip from '../components/BetSlip';
 import GameTile from '../components/GameTile';
 import TicketReceipt from '../components/TicketReceipt';
+import OddsBar from '../components/OddsBar';
 
 const STAKE_PRESETS = [100, 200, 500, 1000, 2000, 5000, 10000];
 
@@ -31,6 +32,7 @@ export const Jeux = () => {
   const { phase, remaining, gameId } = useRoulette();
   const [bets, setBets] = useState([]);
   const [selectedStake, setSelectedStake] = useState(500);
+  const [betMode, setBetMode] = useState(null); // null = Tous; sinon STRAIGHT, COLOR, etc.
   const [loading, setLoading] = useState(false);
   const [lastTicket, setLastTicket] = useState(null);
   const [error, setError] = useState('');
@@ -173,8 +175,11 @@ export const Jeux = () => {
           </div>
         )}
 
-        {/* Betting Grid */}
-        <BettingGrid addBet={addBet} isBettingOpen={isBettingOpen} />
+        {/* Cotes interactives */}
+        <OddsBar value={betMode} onChange={setBetMode} />
+
+        {/* Betting Grid (verrouille les zones selon betMode) */}
+        <BettingGrid addBet={addBet} isBettingOpen={isBettingOpen} betMode={betMode} />
       </section>
 
       {/* RIGHT — Bet slip */}
