@@ -345,6 +345,23 @@ async def get_my_shift_summary(
     }
 
 
+@app.get("/admin/{short_code}", response_model=TicketResponse, dependencies=[Depends(verify_admin_key)])
+async def admin_get_ticket_by_code(
+    short_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Endpoint Backoffice (x-api-key) pour consulter un ticket depuis le tableau Betslip."""
+    result = await db.execute(
+        select(Ticket)
+        .options(selectinload(Ticket.bets))
+        .where(Ticket.short_code == short_code)
+    )
+    ticket = result.scalars().first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable.")
+    return ticket
+
+
 @app.get("/{short_code}", response_model=TicketResponse)
 async def get_ticket_by_code(
     short_code: str,

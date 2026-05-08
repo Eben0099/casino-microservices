@@ -8,7 +8,7 @@ const NAV_ITEMS = [
   { label: "Vue d'ensemble", path: '/dashboard' },
   { label: 'Jeux',            path: '/roulette'  },
   { label: 'Caissiers',       path: '/agents'    },
-  { label: 'Transactions',    path: '/transactions' },
+  { label: 'Betslip',         path: '/transactions' },
   { label: 'Paramètres',      path: '/parametres' },
 ];
 
