@@ -8,6 +8,7 @@ import BetSlip from '../components/BetSlip';
 import GameTile from '../components/GameTile';
 import TicketReceipt from '../components/TicketReceipt';
 import OddsTable from '../components/OddsTable';
+import TicketVerifier from '../components/TicketVerifier';
 
 const STAKE_PRESETS = [100, 200, 500, 1000, 2000, 5000, 10000];
 
@@ -182,6 +183,9 @@ export const Jeux = () => {
 
         {/* Betting Grid (verrouille les zones selon betMode) */}
         <BettingGrid addBet={addBet} isBettingOpen={isBettingOpen} betMode={betMode} />
+
+        {/* Ticket verifier inline (sous le tapis) */}
+        <TicketVerifier variant="inline" />
       </section>
 
       {/* RIGHT — Bet slip */}
