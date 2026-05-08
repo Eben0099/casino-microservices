@@ -257,7 +257,8 @@ async def create_ticket(
         db.add(new_bet)
         
     # 5. COMMUNICATION INTER-SERVICES : Mettre à jour la caisse de l'agent
-    agent_url = f"http://agent-service:8000/{ticket_in.agent_id}/provision"
+    agent_base = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8000")
+    agent_url = f"{agent_base}/{ticket_in.agent_id}/provision"
     admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
 
     async with httpx.AsyncClient() as client:
@@ -406,7 +407,8 @@ async def payout_ticket(
         raise HTTPException(status_code=400, detail="Ce ticket n'a aucun gain à payer.")
 
     # 3. Appeler agent-service pour enregistrer le décaissement
-    agent_url = f"http://agent-service:8000/{ticket.agent_id}/provision"
+    agent_base = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8000")
+    agent_url = f"{agent_base}/{ticket.agent_id}/provision"
     admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
 
     async with httpx.AsyncClient() as client:

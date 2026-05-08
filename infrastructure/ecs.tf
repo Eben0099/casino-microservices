@@ -47,7 +47,10 @@ locals {
         { name = "REDIS_URL",          value = local.redis_url },
         { name = "JWT_SECRET",         value = local.jwt_secret },
         { name = "ADMIN_API_KEY",      value = local.admin_api_key },
-        { name = "ROOT_PATH",          value = "/api/tickets" }
+        { name = "ROOT_PATH",          value = "/api/tickets" },
+        # Inter-service: appel ticket-service -> agent-service via l'ALB.
+        # En local docker-compose le default 'http://agent-service:8000' est resolu par DNS Docker.
+        { name = "AGENT_SERVICE_URL",  value = "http://${aws_lb.main.dns_name}/api/agents" }
       ]
     }
   }
