@@ -59,5 +59,13 @@ jobs:
         docker buildx build --platform linux/arm64 \
           -t ${{ env.ECR_REGISTRY }}/casino-backoffice-web:latest \
           ./services/backoffice --push
-          
+
         aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service casino-web-service --force-new-deployment
+
+        # --- DÉPLOIEMENT DU FRONT AGENT (POS) ---
+        echo "🛒 Traitement du service : agent-web"
+        docker buildx build --platform linux/arm64 \
+          -t ${{ env.ECR_REGISTRY }}/casino-agent-web:latest \
+          ./services/agent-web --push
+
+        aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service casino-agent-web-service --force-new-deployment
