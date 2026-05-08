@@ -4,8 +4,8 @@ set -e
 
 echo "🚀 Démarrage du service Agent..."
 
-# Attendre que la base de données soit prête (optionnel, mais propre)
-# On pourrait utiliser un outil comme 'nc' ou simplement laisser Alembic échouer et redémarrer (ECS fera le retry)
+echo "🗄️  Bootstrap base de données (init_db)..."
+python -m app.init_db
 
 echo "📂 Application des migrations de base de données (Alembic)..."
 alembic upgrade head

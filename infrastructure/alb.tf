@@ -109,6 +109,24 @@ resource "aws_lb_listener_rule" "agent_web" {
   }
 }
 
+# 5ter. Règle WebSocket /ws/roulette* — utilisée par le backoffice admin et l'agent POS
+# pour la connexion live au moteur de roulette (phase, result_revealed, stats).
+resource "aws_lb_listener_rule" "roulette_ws" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 6
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backends["game-roulette-service"].arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/ws/roulette*"]
+    }
+  }
+}
+
 # --- ZONES D'ATTENTE (TARGET GROUPS) POUR LES BACKENDS ---
 resource "aws_lb_target_group" "backends" {
   for_each    = local.microservices

@@ -4,6 +4,9 @@ set -e
 
 echo "🚀 Démarrage du service Ticket..."
 
+echo "🗄️  Bootstrap base de données (init_db)..."
+python -m app.init_db
+
 echo "📂 Application des migrations de base de données (Alembic)..."
 alembic upgrade head
 
