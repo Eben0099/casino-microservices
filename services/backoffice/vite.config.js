@@ -5,9 +5,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: true, // Permet d'écouter sur l'IP du conteneur Docker
-    allowedHosts: [
-      'casino-alb-131591739.eu-west-3.elb.amazonaws.com'
-    ]
-  }
+    host: true,          // 0.0.0.0 (IP du conteneur Docker / ECS)
+    port: 5173,
+    allowedHosts: true,  // accepte tout hostname (ALB DNS, IP, domaine custom)
+    watch: { usePolling: true },
+  },
 })

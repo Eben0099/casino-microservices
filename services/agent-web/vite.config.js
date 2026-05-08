@@ -6,10 +6,9 @@ export default defineConfig({
   plugins: [react()],
   base: '/agents/pos/', // Indispensable car servi sous /agents/pos par Traefik
   server: {
-    host: true,
+    host: true,          // 0.0.0.0 (IP du conteneur Docker / ECS)
     port: 5173,
-    watch: {
-      usePolling: true
-    }
+    allowedHosts: true,  // accepte tout hostname (ALB DNS, IP, domaine custom)
+    watch: { usePolling: true },
   }
 })
