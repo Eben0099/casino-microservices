@@ -14,6 +14,7 @@ from sqlalchemy import select
 from .database import engine, SessionLocal
 from .models import RouletteRound
 from .rules import get_number_properties, calculate_stats
+from .settings import load_settings, save_settings, DEFAULT_SETTINGS
 
 # Number of synthetic results used to populate stats on the very first boot
 # (only when Redis history is empty — never overwrites real production data).
