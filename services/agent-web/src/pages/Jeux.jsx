@@ -7,7 +7,7 @@ import BettingGrid from '../components/BettingGrid';
 import BetSlip from '../components/BetSlip';
 import GameTile from '../components/GameTile';
 import TicketReceipt from '../components/TicketReceipt';
-import OddsBar from '../components/OddsBar';
+import OddsTable from '../components/OddsTable';
 
 const STAKE_PRESETS = [100, 200, 500, 1000, 2000, 5000, 10000];
 
@@ -83,10 +83,15 @@ export const Jeux = () => {
   };
 
   return (
-    <div className="animate-fade" style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(120px, 132px) 1fr minmax(300px, 360px)' }}>
+    <div className="animate-fade" style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(108px, 116px) minmax(200px, 230px) 1fr minmax(290px, 340px)' }}>
       {/* LEFT — Game tiles */}
       <aside style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {GAMES.map((g) => <GameTile key={g.code} {...g} />)}
+      </aside>
+
+      {/* ODDS TABLE */}
+      <aside>
+        <OddsTable value={betMode} onChange={setBetMode} />
       </aside>
 
       {/* CENTER — Phase + Stake selector + Roulette table */}
@@ -174,9 +179,6 @@ export const Jeux = () => {
             {error}
           </div>
         )}
-
-        {/* Cotes interactives */}
-        <OddsBar value={betMode} onChange={setBetMode} />
 
         {/* Betting Grid (verrouille les zones selon betMode) */}
         <BettingGrid addBet={addBet} isBettingOpen={isBettingOpen} betMode={betMode} />
