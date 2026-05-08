@@ -50,7 +50,7 @@ const Layout = () => {
               fontSize: 15, fontWeight: 800, letterSpacing: '0.22em',
               color: 'var(--text-primary)', fontFamily: 'Outfit',
             }}>
-              CAISSE
+              CASHER
             </span>
           </NavLink>
 

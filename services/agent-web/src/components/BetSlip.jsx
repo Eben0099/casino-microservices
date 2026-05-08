@@ -20,7 +20,7 @@ const getBetInfo = (bet) => {
 const BetSlip = ({
   bets, removeBet, clearBets, submitTicket,
   isBettingOpen, loading,
-  ticketLabel = 'Ticket',
+  ticketLabel = 'Betslip',
   shopLabel,
   shopMeta,
 }) => {

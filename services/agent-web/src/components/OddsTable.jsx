@@ -11,7 +11,7 @@ export const BET_MODES = [
   { id: 'DOZEN',    label: 'Douzaine',        mult: 3  },
   { id: 'COLOR',    label: 'Couleur',         mult: 2  },
   { id: 'EVEN_ODD', label: 'Pair / Impair',   mult: 2  },
-  { id: 'HALF',     label: 'Manque / Passe',  mult: 2  },
+  { id: 'HALF',     label: 'High / Low',      mult: 2  },
 ];
 
 /* Three groups for visual breathing room — same idea as the bet slip rows */

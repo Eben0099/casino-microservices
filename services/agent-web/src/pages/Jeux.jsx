@@ -193,7 +193,7 @@ export const Jeux = () => {
           submitTicket={submitTicket}
           isBettingOpen={isBettingOpen}
           loading={loading}
-          ticketLabel={`Ticket Spin & Win`}
+          ticketLabel={`Betslip Spin & Win`}
           shopLabel={user?.kiosk_name || user?.name || 'Caisse'}
           shopMeta={gameId ? `→ ${gameId}` : null}
         />

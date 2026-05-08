@@ -336,6 +336,18 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         </div>
       </div>
 
+      {/* LOW / HIGH — directement sous les chiffres concernes (1-18 / 19-36) */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: '52px 1fr 1fr 44px', gap: 0,
+        position: 'relative', zIndex: 1,
+        ...sectionDim('HALF'),
+      }}>
+        <div />
+        <OutBtn label="LOW"  id="low-row"  type="HALF" onClick={() => addBet('HALF', '1-18')} />
+        <OutBtn label="HIGH" id="high-row" type="HALF" onClick={() => addBet('HALF', '19-36')} />
+        <div />
+      </div>
+
       {/* Dozens */}
       <div style={{
         display: 'grid', gridTemplateColumns: '52px 1fr 1fr 1fr 44px', gap: 0,
@@ -386,7 +398,7 @@ const labelOf = (mode) => ({
   DOZEN:    'Douzaine',
   COLOR:    'Couleur',
   EVEN_ODD: 'Pair / Impair',
-  HALF:     'Manque / Passe',
+  HALF:     'High / Low',
 }[mode] || mode);
 
 export default BettingGrid;

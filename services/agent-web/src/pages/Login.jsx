@@ -108,7 +108,7 @@ export const Login = () => {
           }}>AG</div>
           <div>
             <p style={{ fontSize: 14, fontWeight: 800, letterSpacing: '0.18em', color: 'var(--text-primary)', fontFamily: 'Outfit' }}>
-              AGDTECH CAISSE
+              AGDTECH CASHER
             </p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               Plateforme de jeux & loterie
