@@ -32,6 +32,7 @@ yarn-error.log*
 .vscode/
 .gemini/
 .claude/
+CLAUDE.md
 
 # --- PLAYWRIGHT / DEV ARTIFACTS ---
 .playwright-mcp/
