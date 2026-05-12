@@ -2,35 +2,21 @@ import React from 'react';
 import { Globe2, Gamepad2, MapPin, Crown, Gem, Sparkles } from 'lucide-react';
 import { useT } from '../i18n';
 
+// Tout le bandeau est calé sur une palette dorée — distinction par scope/tier
+// via nuances de doré + iconographie, plus de variations bleues/violettes.
 const SCOPE_META = {
-  GLOBAL: { color: '#a855f7', soft: 'rgba(168,85,247,0.15)', Icon: Globe2 },
-  GAME:   { color: '#3b82f6', soft: 'rgba(59,130,246,0.15)', Icon: Gamepad2 },
-  LOCAL:  { color: '#f59e0b', soft: 'rgba(245,158,11,0.18)', Icon: MapPin },
+  GLOBAL: { color: '#fde047', Icon: Crown },     // jaune lumineux (réseau)
+  GAME:   { color: '#eab308', Icon: Gamepad2 },  // or moyen (par jeu)
+  LOCAL:  { color: '#f59e0b', Icon: MapPin },    // ambre (local kiosque)
 };
 
-// Palette tier : on traite Or comme la version la plus brillante (couronne + animation)
 const TIER_META = {
-  BRONZE: {
-    primary: '#d97706', secondary: '#92400e',
-    gradient: 'linear-gradient(135deg, #d97706 0%, #92400e 100%)',
-    glow: 'rgba(217, 119, 6, 0.45)',
-    Icon: Gem,
-  },
-  SILVER: {
-    primary: '#cbd5e1', secondary: '#64748b',
-    gradient: 'linear-gradient(135deg, #e2e8f0 0%, #64748b 100%)',
-    glow: 'rgba(203, 213, 225, 0.55)',
-    Icon: Gem,
-  },
-  GOLD: {
-    primary: '#fde047', secondary: '#ca8a04',
-    gradient: 'linear-gradient(135deg, #fde047 0%, #ca8a04 100%)',
-    glow: 'rgba(253, 224, 71, 0.70)',
-    Icon: Crown,
-  },
+  BRONZE: { color: '#b45309', Icon: Gem },
+  SILVER: { color: '#cbd5e1', Icon: Gem },
+  GOLD:   { color: '#fde047', Icon: Crown },
 };
 
-const fontDisplay = "'Bebas Neue', 'Outfit', sans-serif";
+const FONT_777 = "'Faster', 'Bebas Neue', sans-serif"; // slot-machine display
 
 const PotCard = ({ pot }) => {
   const { t, fmtN } = useT();
@@ -38,9 +24,7 @@ const PotCard = ({ pot }) => {
   const tier = pot.tier ? TIER_META[pot.tier] : null;
   const ScopeIcon = scope.Icon;
   const TierIcon = tier?.Icon;
-  const accent = tier ? tier.primary : scope.color;
-  const glow = tier ? tier.glow : `${scope.color}55`;
-  const gradient = tier?.gradient || `linear-gradient(135deg, ${scope.color}, ${scope.color}aa)`;
+  const accent = tier ? tier.color : scope.color;
   const isGold = pot.tier === 'GOLD';
 
   const headline = pot.scope === 'GLOBAL'
@@ -55,69 +39,60 @@ const PotCard = ({ pot }) => {
     <div style={{
       position: 'relative',
       minWidth: 220, padding: '12px 16px 12px 14px', borderRadius: 12,
-      background: 'linear-gradient(160deg, #15171d 0%, #1d1f27 60%, #2a1e0a 100%)',
-      border: `1px solid ${accent}66`,
-      boxShadow: `0 0 0 1px ${accent}22 inset, 0 0 24px ${glow}`,
+      background: '#15171d',
+      border: `1px solid ${accent}55`,
+      boxShadow: isGold
+        ? `0 0 16px ${accent}55`
+        : `inset 0 0 0 1px ${accent}1A`,
       display: 'flex', alignItems: 'center', gap: 12,
       overflow: 'hidden',
       animation: isGold ? 'jackpot-gold-pulse 2.4s ease-in-out infinite' : undefined,
     }}>
-      {/* Decoratif : trait lumineux haut */}
-      <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-        background: `linear-gradient(90deg, transparent, ${accent}cc, transparent)`,
-      }} />
-
-      {/* Decoratif : sparkles or */}
       {isGold && (
         <Sparkles size={11} style={{
           position: 'absolute', top: 6, right: 8,
-          color: '#fde047', opacity: 0.7,
+          color: accent, opacity: 0.7,
           animation: 'jackpot-twinkle 1.6s ease-in-out infinite',
         }} />
       )}
 
-      {/* Icon medallion */}
+      {/* Icon medallion — couleur tier unie (pas de degrade) */}
       <div style={{
-        position: 'relative',
         width: 38, height: 38, borderRadius: 10,
-        background: gradient, color: '#0a0c10',
+        background: accent, color: '#0a0c10',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: `0 0 18px ${glow}, inset 0 -8px 16px rgba(0,0,0,0.25)`,
+        boxShadow: `0 0 10px ${accent}55`,
       }}>
         {TierIcon ? <TierIcon size={18} strokeWidth={2.4} /> : <ScopeIcon size={18} strokeWidth={2.4} />}
       </div>
 
-      {/* Text block */}
-      <div style={{ minWidth: 0, flex: 1, position: 'relative' }}>
+      <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2,
+          fontFamily: FONT_777,
+          fontStyle: 'italic',
+          fontSize: 13, letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: accent,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          marginBottom: 2,
+          lineHeight: 1,
         }}>
-          <ScopeIcon size={9} style={{ color: scope.color, opacity: 0.85 }} />
-          <div style={{
-            fontFamily: fontDisplay,
-            fontSize: 11, fontWeight: 400, letterSpacing: '0.18em',
-            textTransform: 'uppercase',
-            color: 'rgba(203, 213, 225, 0.85)',
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {headline}
-          </div>
+          {headline}
         </div>
         <div style={{
-          fontFamily: "'Outfit', sans-serif",
-          fontSize: 22, fontWeight: 900, fontVariantNumeric: 'tabular-nums',
-          lineHeight: 1, letterSpacing: '0.005em',
-          background: gradient,
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          textShadow: `0 0 14px ${glow}`,
-          filter: `drop-shadow(0 0 8px ${glow})`,
+          fontFamily: FONT_777,
+          fontStyle: 'italic',
+          fontSize: 24, fontWeight: 400,
+          fontVariantNumeric: 'tabular-nums',
+          lineHeight: 1, letterSpacing: '0.01em',
+          color: accent,
+          textShadow: isGold ? `0 0 12px ${accent}80` : 'none',
         }}>
           {fmtN(pot.current_amount)}
           <span style={{
-            fontSize: 10, fontWeight: 700, opacity: 0.7, marginLeft: 4,
-            WebkitTextFillColor: accent, letterSpacing: '0.1em',
+            fontSize: 11, fontFamily: "'Bebas Neue', sans-serif",
+            fontStyle: 'normal', opacity: 0.75, marginLeft: 6,
+            letterSpacing: '0.15em',
           }}>
             XAF
           </span>
@@ -145,53 +120,40 @@ const JackpotsBar = ({ pots }) => {
       position: 'relative',
       display: 'flex', alignItems: 'center', gap: 14,
       padding: '10px 14px', borderRadius: 12,
-      background: 'linear-gradient(90deg, rgba(20,23,28,1) 0%, rgba(26,21,9,1) 50%, rgba(20,23,28,1) 100%)',
-      border: '1px solid rgba(234, 179, 8, 0.20)',
-      boxShadow: '0 0 0 1px rgba(234, 179, 8, 0.06) inset, 0 4px 16px rgba(0,0,0,0.25)',
+      background: '#14171c',
+      border: '1px solid rgba(234, 179, 8, 0.25)',
+      boxShadow: 'inset 0 0 0 1px rgba(234, 179, 8, 0.05)',
       overflow: 'hidden',
     }}>
       <style>{`
         @keyframes jackpot-gold-pulse {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(253,224,71,0.22) inset, 0 0 24px rgba(253,224,71,0.45); }
-          50%      { box-shadow: 0 0 0 1px rgba(253,224,71,0.5) inset,  0 0 36px rgba(253,224,71,0.85); }
+          0%, 100% { box-shadow: 0 0 16px rgba(253,224,71,0.4); }
+          50%      { box-shadow: 0 0 28px rgba(253,224,71,0.75); }
         }
         @keyframes jackpot-twinkle {
           0%, 100% { opacity: 0.4; transform: scale(0.85); }
           50%      { opacity: 1;   transform: scale(1.15); }
         }
-        @keyframes jackpot-ribbon-shine {
-          0%, 100% { transform: translateX(-100%); }
-          50%      { transform: translateX(100%);  }
-        }
       `}</style>
 
-      {/* Ribbon shine animée */}
+      {/* Title block — police casino */}
       <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: '100%',
-        background: 'linear-gradient(90deg, transparent 0%, rgba(253,224,71,0.05) 50%, transparent 100%)',
-        animation: 'jackpot-ribbon-shine 6s ease-in-out infinite',
-        pointerEvents: 'none',
-      }} />
-
-      {/* Title block */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
         paddingRight: 14, borderRight: '1px solid rgba(234, 179, 8, 0.18)',
       }}>
-        <Crown size={18} style={{
+        <Crown size={20} style={{
           color: '#fde047',
-          filter: 'drop-shadow(0 0 6px rgba(253,224,71,0.7))',
+          filter: 'drop-shadow(0 0 4px rgba(253,224,71,0.6))',
         }} />
-        <div style={{ lineHeight: 1 }}>
-          <div style={{
-            fontFamily: fontDisplay,
-            fontSize: 16, fontWeight: 400, letterSpacing: '0.2em',
-            textTransform: 'uppercase',
-            background: 'linear-gradient(180deg, #fde047 0%, #ca8a04 100%)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          }}>
-            {t('jackpots.bar.title')}
-          </div>
+        <div style={{
+          fontFamily: FONT_777,
+          fontStyle: 'italic',
+          fontSize: 20, letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: '#fde047',
+          lineHeight: 1,
+        }}>
+          {t('jackpots.bar.title')}
         </div>
       </div>
 
