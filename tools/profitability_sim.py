@@ -45,6 +45,145 @@ BLACK = set(range(1, 37)) - RED
 
 
 # ----------------------------------------------------------------------------
+# Jackpot engine — replique la logique de services/ticket-service/app/jackpot/
+# en pur Python pour la simulation. Les memes parametres (scope, modes, seuils)
+# sont supportes pour pouvoir charger les configs de prod par export JSON.
+# ----------------------------------------------------------------------------
+@dataclass
+class PotConfig:
+    name: str                      # libelle lisible pour le rapport
+    scope: str                     # GLOBAL | GAME | LOCAL
+    game_id: str | None = None
+    kiosk_id: str | None = None
+    tier: str | None = None
+    contribution_mode: str = "PERCENT"   # PERCENT | FIXED
+    contribution_percent: float = 0.5
+    contribution_fixed: int = 0
+    threshold_min: int = 100_000
+    threshold_max: int = 500_000
+    reset_mode: str = "ZERO"             # ZERO | SEED
+    seed_amount: int = 0
+    winner_mode: str = "TRIGGER_TICKET"  # TRIGGER_TICKET | RANDOM_RECENT
+    max_payout: int | None = None        # cap optionnel
+
+
+@dataclass
+class PotState:
+    config: PotConfig
+    current_amount: int = 0
+    current_threshold: int = 0
+    cycle_number: int = 1
+    hits: int = 0
+    total_contributed: int = 0
+    total_paid: int = 0
+    seeds_planted: int = 0   # somme des seeds remis au demarrage / a chaque reset SEED
+    carryover_held: int = 0  # cumul des carryover (en pratique reintegre au pot, suivi info)
+
+
+class JackpotEngine:
+    """Simulation a peu de frais des pots : on ignore RANDOM_RECENT
+    pour la simulation (le gagnant est toujours le ticket declencheur,
+    car le payout total est identique a long terme — seul le bénéficiaire
+    change, pas la masse redistribuee)."""
+
+    def __init__(self, configs: list[PotConfig], rng: random.Random):
+        self.rng = rng
+        self.pots: list[PotState] = []
+        for cfg in configs:
+            initial = cfg.seed_amount if cfg.reset_mode == "SEED" else 0
+            ps = PotState(
+                config=cfg,
+                current_amount=initial,
+                current_threshold=self._draw(cfg),
+                seeds_planted=initial,
+            )
+            self.pots.append(ps)
+
+    def _draw(self, cfg: PotConfig) -> int:
+        return self.rng.randint(cfg.threshold_min, cfg.threshold_max)
+
+    def _eligible(self, ps: PotState, game_id: str, kiosk_id: str) -> bool:
+        c = ps.config
+        if c.scope == "GLOBAL":
+            return True
+        if c.scope == "GAME":
+            return c.game_id == game_id
+        if c.scope == "LOCAL":
+            return c.game_id == game_id and c.kiosk_id == kiosk_id
+        return False
+
+    def _contribution(self, ps: PotState, ticket_wager: int) -> int:
+        c = ps.config
+        if c.contribution_mode == "FIXED":
+            return int(c.contribution_fixed)
+        return int(ticket_wager * c.contribution_percent / 100)
+
+    def process_ticket(self, ticket_wager: int, game_id: str, kiosk_id: str) -> int:
+        """Alimente tous les pots eligibles, retourne le payout jackpot pour ce ticket."""
+        total_payout = 0
+        for ps in self.pots:
+            if not self._eligible(ps, game_id, kiosk_id):
+                continue
+            contrib = self._contribution(ps, ticket_wager)
+            if contrib <= 0:
+                continue
+            ps.current_amount += contrib
+            ps.total_contributed += contrib
+
+            if ps.current_amount >= ps.current_threshold:
+                # HIT
+                payout = ps.current_amount
+                if ps.config.max_payout is not None and ps.config.max_payout > 0:
+                    payout = min(payout, ps.config.max_payout)
+                carryover = ps.current_amount - payout
+
+                ps.hits += 1
+                ps.total_paid += payout
+                ps.carryover_held += carryover
+                total_payout += payout
+
+                # Reset cycle
+                base = ps.config.seed_amount if ps.config.reset_mode == "SEED" else 0
+                ps.current_amount = base + carryover
+                if ps.config.reset_mode == "SEED":
+                    ps.seeds_planted += base
+                ps.current_threshold = self._draw(ps.config)
+                ps.cycle_number += 1
+
+        return total_payout
+
+
+# Configurations par defaut representatives d'un deploiement typique :
+# - 1 Jackpot General reseau (Or unique)
+# - 3 Jackpots Roulette (Bronze / Argent / Or)
+# - 3 Jackpots Locaux (Bronze / Argent / Or) sur un kiosque "demo"
+DEFAULT_JACKPOT_CONFIGS = [
+    PotConfig("Global",               scope="GLOBAL",
+              contribution_mode="PERCENT", contribution_percent=0.5,
+              threshold_min=5_000_000, threshold_max=20_000_000,
+              reset_mode="SEED", seed_amount=500_000),
+    PotConfig("Roulette Bronze",      scope="GAME", game_id="roulette", tier="BRONZE",
+              contribution_mode="PERCENT", contribution_percent=0.3,
+              threshold_min=50_000, threshold_max=200_000),
+    PotConfig("Roulette Argent",      scope="GAME", game_id="roulette", tier="SILVER",
+              contribution_mode="PERCENT", contribution_percent=0.3,
+              threshold_min=200_000, threshold_max=1_000_000),
+    PotConfig("Roulette Or",          scope="GAME", game_id="roulette", tier="GOLD",
+              contribution_mode="PERCENT", contribution_percent=0.3,
+              threshold_min=1_000_000, threshold_max=5_000_000),
+    PotConfig("Local Demo Bronze",    scope="LOCAL", game_id="roulette", kiosk_id="demo", tier="BRONZE",
+              contribution_mode="FIXED", contribution_fixed=50,
+              threshold_min=20_000, threshold_max=80_000),
+    PotConfig("Local Demo Argent",    scope="LOCAL", game_id="roulette", kiosk_id="demo", tier="SILVER",
+              contribution_mode="FIXED", contribution_fixed=50,
+              threshold_min=80_000, threshold_max=300_000),
+    PotConfig("Local Demo Or",        scope="LOCAL", game_id="roulette", kiosk_id="demo", tier="GOLD",
+              contribution_mode="FIXED", contribution_fixed=50,
+              threshold_min=300_000, threshold_max=1_500_000),
+]
+
+
+# ----------------------------------------------------------------------------
 # RNG — same algorithm as services/game-roulette-service/app/main.py
 # ----------------------------------------------------------------------------
 def spin(server_seed: str, nonce: str) -> int:
@@ -236,16 +375,22 @@ class Stats:
     pnl_history: list[int] = field(default_factory=list)  # cumulative GGR per round
     biggest_round_win_for_player: int = 0
     biggest_round_loss_for_player: int = 0
+    # Jackpot
+    jackpot_engine: "JackpotEngine | None" = None
+    jackpot_paid_total: int = 0  # somme des payouts jackpots verses aux joueurs
 
 
 def run_simulation(
     rounds: int,
     seed: int | None,
     martingale_count: int = 5,
+    jackpot_configs: list[PotConfig] | None = None,
 ) -> Stats:
     rng = random.Random(seed)
     server_seed = secrets.token_hex(32) if seed is None else f"seed-{seed}"
     stats = Stats()
+    if jackpot_configs:
+        stats.jackpot_engine = JackpotEngine(jackpot_configs, rng)
     martingale_states = [{"losses": 0} for _ in range(martingale_count)]
 
     cum_ggr = 0
@@ -276,6 +421,7 @@ def run_simulation(
 
         round_wager = 0
         round_payout = 0
+        tickets_wager: dict[str, int] = defaultdict(int)  # profile -> total wager (pour jackpot)
         for bet_type, target, stake, profile in round_bets:
             payout = calculate_payout(bet_type, target, stake, str(winning))
             stats.wagered += stake
@@ -286,6 +432,17 @@ def run_simulation(
             stats.paid_by_profile[profile] += payout
             round_wager += stake
             round_payout += payout
+            tickets_wager[profile] += stake
+
+        # Hook jackpot : chaque "ticket" (= ensemble de paris d'un profile dans le round)
+        # alimente les pots eligibles. Le payout jackpot s'ajoute au paye joueur.
+        if stats.jackpot_engine and tickets_wager:
+            for profile, total_wager in tickets_wager.items():
+                jp_payout = stats.jackpot_engine.process_ticket(total_wager, "roulette", "demo")
+                if jp_payout > 0:
+                    stats.jackpot_paid_total += jp_payout
+                    stats.paid_by_profile[profile] += jp_payout
+                    round_payout += jp_payout
 
         # Update martingale state by re-walking the list in the same order
         m_idx = 0
@@ -298,6 +455,7 @@ def run_simulation(
                     martingale_states[m_idx]["losses"] += 1
                 m_idx += 1
 
+        # round_payout inclut deja les jackpots si actifs
         round_ggr = round_wager - round_payout
         cum_ggr += round_ggr
         stats.rounds += 1
@@ -381,6 +539,44 @@ def print_report(stats: Stats, bankroll: int, rounds_per_day: int):
     print(f"RTP empirique        : {rtp_overall * 100:.3f}%   (théorique 97.297%)")
     print(f"House edge empirique : {edge * 100:.3f}%   (théorique 2.703%)")
     print()
+
+    # Section jackpot (si actif)
+    if stats.jackpot_engine:
+        print("--- Impact JACKPOTS sur le RTP ---")
+        jp_paid = stats.jackpot_paid_total
+        jp_rtp = jp_paid / stats.wagered if stats.wagered else 0
+        total_rtp = rtp_overall + jp_rtp
+        total_edge = 1 - total_rtp
+        total_ggr = stats.wagered - stats.paid_out - jp_paid
+
+        sum_contrib = sum(p.total_contributed for p in stats.jackpot_engine.pots)
+        sum_residual = sum(p.current_amount for p in stats.jackpot_engine.pots)
+        sum_seeds = sum(p.seeds_planted for p in stats.jackpot_engine.pots)
+        sum_hits = sum(p.hits for p in stats.jackpot_engine.pots)
+
+        print(f"Pots configures      : {len(stats.jackpot_engine.pots)}")
+        print(f"HITs total           : {sum_hits}")
+        print(f"Contributions totales: {fmt(sum_contrib)} XAF")
+        print(f"Payouts jackpots     : {fmt(jp_paid)} XAF")
+        print(f"Résiduel dans pots   : {fmt(sum_residual)} XAF  (capital encore en jeu)")
+        print(f"Seeds plantés (coût) : {fmt(sum_seeds)} XAF  (financés par la maison, hors mises)")
+        # Invariant : seeds + contribs == paid + residual
+        invariant_delta = sum_seeds + sum_contrib - jp_paid - sum_residual
+        print(f"Invariant conservation: delta = {invariant_delta:+}  (doit etre proche de 0)")
+        print()
+        print(f"RTP jackpot          : +{jp_rtp * 100:.3f}%   (additionnel sur le RTP joueur)")
+        print(f"RTP total joueur     : {total_rtp * 100:.3f}%   (roulette + jackpot)")
+        print(f"House edge effectif  : {total_edge * 100:.3f}%   (apres financement jackpots)")
+        print(f"GGR net casino       : {fmt(total_ggr)} XAF  (vs {fmt(ggr)} XAF sans jackpots)")
+        print(f"Cout des jackpots    : {fmt(ggr - total_ggr)} XAF  ({(ggr - total_ggr) / max(ggr, 1) * 100:.1f}% du GGR roulette)")
+        print()
+
+        print("--- Détail par pot ---")
+        print(f"{'Pot':<24}{'HITs':>6}{'Contrib':>14}{'Payouts':>14}{'Résiduel':>14}{'RTP/pot':>10}")
+        for p in stats.jackpot_engine.pots:
+            pot_rtp = (p.total_paid / p.total_contributed * 100) if p.total_contributed else 0
+            print(f"  {p.config.name:<22}{p.hits:>6}{fmt(p.total_contributed):>14}{fmt(p.total_paid):>14}{fmt(p.current_amount):>14}{pot_rtp:>9.2f}%")
+        print()
     print("--- RTP par type de pari (vérification du code de payout) ---")
     rows = []
     for t in [
@@ -546,11 +742,16 @@ def main():
     parser.add_argument("--bankroll", type=int, default=10_000_000, help="Bankroll cashier en XAF")
     parser.add_argument("--rounds-per-day", type=int, default=1000, help="Rounds par journée d'exploitation")
     parser.add_argument("--martingale", type=int, default=3, help="Nombre de joueurs martingale RED simultanés")
+    parser.add_argument("--with-jackpots", action="store_true", help="Active la simulation des pots jackpot par-dessus la roulette")
     parser.add_argument("--json", action="store_true", help="Sortie JSON pour CI")
     args = parser.parse_args()
 
-    print(f"Simulation en cours : {fmt(args.rounds)} rounds...")
-    stats = run_simulation(args.rounds, args.seed, martingale_count=args.martingale)
+    jackpot_configs = DEFAULT_JACKPOT_CONFIGS if args.with_jackpots else None
+    label = " + jackpots" if jackpot_configs else ""
+    print(f"Simulation en cours : {fmt(args.rounds)} rounds{label}...")
+    stats = run_simulation(args.rounds, args.seed,
+                           martingale_count=args.martingale,
+                           jackpot_configs=jackpot_configs)
 
     if args.json:
         rtp = stats.paid_out / stats.wagered if stats.wagered else 0
