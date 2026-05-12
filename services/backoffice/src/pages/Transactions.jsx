@@ -121,7 +121,7 @@ function Transactions() {
   };
 
   return (
-    <div className="animate-fade max-w-[1400px] mx-auto">
+    <div className="animate-fade w-full">
       {/* Header */}
       <div className="flex justify-between items-center mb-5">
         <div>

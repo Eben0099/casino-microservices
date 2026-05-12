@@ -307,7 +307,7 @@ function Parametres() {
   };
 
   return (
-    <div className="animate-fade max-w-[1400px] mx-auto">
+    <div className="animate-fade w-full">
       <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Paramètres</h1>
       <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>Configuration globale de la plateforme</p>
 

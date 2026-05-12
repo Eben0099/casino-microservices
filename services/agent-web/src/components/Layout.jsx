@@ -3,12 +3,13 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { Sun, Moon, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useT, LanguageToggle } from '../i18n';
 
-const NAV_ITEMS = [
-  { label: 'Jeux',     path: '/jeux'    },
-  { label: 'Ventes',   path: '/ventes'  },
-  { label: 'Vérifier', path: '/verify'  },
-  { label: 'Service',  path: '/shift'   },
+const NAV_KEYS = [
+  { key: 'nav.games',  path: '/jeux'    },
+  { key: 'nav.sales',  path: '/ventes'  },
+  { key: 'nav.verify', path: '/verify'  },
+  { key: 'nav.shift',  path: '/shift'   },
 ];
 
 const useClock = () => {
@@ -20,11 +21,10 @@ const useClock = () => {
   return now;
 };
 
-const fmt = (n) => Math.round(n || 0).toLocaleString('fr-FR');
-
 const Layout = () => {
   const { user, balance, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { t, fmtN, locale } = useT();
   const navigate = useNavigate();
   const now = useClock();
 
@@ -50,13 +50,13 @@ const Layout = () => {
               fontSize: 15, fontWeight: 800, letterSpacing: '0.22em',
               color: 'var(--text-primary)', fontFamily: 'Outfit',
             }}>
-              CASHER
+              {t('layout.brand')}
             </span>
           </NavLink>
 
           {/* Nav links */}
           <nav style={{ display: 'flex', gap: 4 }}>
-            {NAV_ITEMS.map((item) => (
+            {NAV_KEYS.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
@@ -70,7 +70,7 @@ const Layout = () => {
                   transition: 'background-color 0.15s, color 0.15s',
                 })}
               >
-                {item.label}
+                {t(item.key)}
               </NavLink>
             ))}
           </nav>
@@ -93,10 +93,10 @@ const Layout = () => {
                   fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
                   textTransform: 'uppercase', color: 'var(--text-muted)',
                 }}>
-                  SOLDE
+                  {t('layout.balance')}
                 </span>
                 <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--accent)' }}>
-                  {fmt(balance)} <span style={{ fontSize: 10, opacity: 0.7 }}>XAF</span>
+                  {fmtN(balance)} <span style={{ fontSize: 10, opacity: 0.7 }}>XAF</span>
                 </span>
               </div>
               <div style={{ padding: '6px 12px', display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
@@ -104,7 +104,7 @@ const Layout = () => {
                   fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
                   textTransform: 'uppercase', color: 'var(--text-muted)',
                 }}>
-                  CASH (0)
+                  {t('layout.cash')}
                 </span>
                 <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--success)' }}>
                   0 <span style={{ fontSize: 10, opacity: 0.7 }}>XAF</span>
@@ -117,23 +117,26 @@ const Layout = () => {
               fontSize: 15, fontWeight: 500, letterSpacing: '0.06em',
               color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums',
             }}>
-              {now.toLocaleTimeString('fr-FR', { hour12: false })}
+              {now.toLocaleTimeString(locale, { hour12: false })}
             </div>
 
             {/* User */}
             <div style={{ textAlign: 'right', lineHeight: 1.15 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                {user?.kiosk_name || user?.name || 'Caissière'}
+                {user?.kiosk_name || user?.name || t('layout.cashierFallback')}
               </p>
               <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {user?.name ? `Caissière ${user.name.split(' ')[0]}` : 'Connectée'}
+                {user?.name ? `${t('layout.cashierPrefix')} ${user.name.split(' ')[0]}` : t('common.connected')}
               </p>
             </div>
+
+            {/* Language */}
+            <LanguageToggle />
 
             {/* Theme */}
             <button
               onClick={toggleTheme}
-              title="Basculer le thème"
+              title={t('common.themeToggle')}
               style={{
                 background: 'transparent', cursor: 'pointer',
                 color: 'var(--text-secondary)',
@@ -158,14 +161,14 @@ const Layout = () => {
               }}
             >
               <LogOut size={14} />
-              Déconnexion
+              {t('common.logout')}
             </button>
           </div>
         </div>
       </header>
 
       {/* PAGE */}
-      <main style={{ flex: 1, padding: '24px', maxWidth: 1440, margin: '0 auto', width: '100%' }}>
+      <main style={{ flex: 1, padding: '24px', width: '100%' }}>
         <Outlet />
       </main>
     </div>

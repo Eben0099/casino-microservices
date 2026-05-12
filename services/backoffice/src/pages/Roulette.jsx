@@ -270,7 +270,7 @@ function Roulette() {
   };
 
   return (
-    <div className="animate-fade max-w-[1400px] mx-auto">
+    <div className="animate-fade w-full">
       <div className="mb-5">
         <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Jeux</h1>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Sélectionnez un jeu pour visualiser son état en direct.</p>
