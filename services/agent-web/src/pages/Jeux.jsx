@@ -10,6 +10,9 @@ import GameTile from '../components/GameTile';
 import TicketReceipt from '../components/TicketReceipt';
 import OddsTable from '../components/OddsTable';
 import TicketVerifier from '../components/TicketVerifier';
+import JackpotsBar from '../components/JackpotsBar';
+import JackpotHitOverlay from '../components/JackpotHitOverlay';
+import { useKioskJackpots } from '../hooks/useKioskJackpots';
 
 const STAKE_PRESETS = [100, 200, 500, 1000, 2000, 5000, 10000];
 
@@ -39,6 +42,9 @@ export const Jeux = () => {
   const [loading, setLoading] = useState(false);
   const [lastTicket, setLastTicket] = useState(null);
   const [error, setError] = useState('');
+  const [jackpotHit, setJackpotHit] = useState(null);
+
+  const { pots: jackpotPots, refresh: refreshJackpots } = useKioskJackpots(user?.kiosk_code);
 
   const isBettingOpen = phase === 'Betting';
   const phaseInfo = phase && PHASE_COLOR[phase]
@@ -79,6 +85,13 @@ export const Jeux = () => {
       setLastTicket(res.data);
       setBets([]);
       await fetchBalance(user.id);
+
+      // Detection HIT : status WON juste apres creation = jackpot attache au ticket.
+      // (Le settlement roulette n'a pas pu tourner deja, le ticket vient d'etre vendu.)
+      if (res.data?.status === 'WON' && (res.data?.total_payout || 0) > 0) {
+        setJackpotHit({ amount: res.data.total_payout, ticketCode: res.data.short_code });
+        refreshJackpots();
+      }
     } catch (err) {
       setError(err.response?.data?.detail || t('jeux.ticketCreationError'));
       setTimeout(() => setError(''), 4000);
@@ -88,7 +101,18 @@ export const Jeux = () => {
   };
 
   return (
-    <div className="animate-fade" style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(108px, 116px) minmax(200px, 230px) 1fr minmax(290px, 340px)' }}>
+    <div className="animate-fade" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {jackpotHit && (
+        <JackpotHitOverlay
+          amount={jackpotHit.amount}
+          ticketCode={jackpotHit.ticketCode}
+          onClose={() => setJackpotHit(null)}
+        />
+      )}
+
+      <JackpotsBar pots={jackpotPots} />
+
+    <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(108px, 116px) minmax(200px, 230px) 1fr minmax(290px, 340px)' }}>
       {/* LEFT — Game tiles */}
       <aside style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {GAMES.map((g) => <GameTile key={g.code} {...g} />)}
@@ -214,6 +238,7 @@ export const Jeux = () => {
           showMaxGain={true}
         />
       )}
+    </div>
     </div>
   );
 };

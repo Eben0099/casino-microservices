@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Ban, CheckCircle, Wallet, Eye } from 'lucide-react';
+import { Plus, X, Ban, CheckCircle, Wallet, Eye, RefreshCw } from 'lucide-react';
 import axios from 'axios';
 
 function Agents() {
@@ -55,6 +55,19 @@ function Agents() {
 
   const openProvision = (agent) => { setSelectedAgent(agent); setProvisionForm({ amount: '', description: '' }); setShowProvisionModal(true); };
 
+  const regenerateKioskCode = async (agent) => {
+    if (!window.confirm(`Regenerer le code du kiosque pour ${agent.display_name} ?\n\nL'ancien code (${agent.kiosk_code || '-'}) sera invalide. Pensez a mettre a jour la configuration Unity.`)) return;
+    try {
+      const res = await axios.post(`/api/agents/admin/${agent.id}/regenerate-code`, {}, config);
+      setSuccess(`Nouveau code : ${res.data.kiosk_code}`); setTimeout(() => setSuccess(''), 4000);
+      fetchAgents();
+      if (selectedAgent?.id === agent.id) setSelectedAgent({ ...selectedAgent, kiosk_code: res.data.kiosk_code });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erreur lors de la regeneration du code');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
   const handleProvision = async (e) => {
     e.preventDefault(); setError('');
     try {
@@ -101,16 +114,16 @@ function Agents() {
         <table className="w-full text-left">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-              {['Nom', 'Telephone', 'Role', 'Kiosque', 'Statut', 'Actions'].map(h => (
+              {['Nom', 'Telephone', 'Role', 'Kiosque', 'Code', 'Statut', 'Actions'].map(h => (
                 <th key={h} className="px-6 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan="6" className="px-6 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Chargement...</td></tr>
+              <tr><td colSpan="7" className="px-6 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Chargement...</td></tr>
             ) : agents.length === 0 ? (
-              <tr><td colSpan="6" className="px-6 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Aucun agent enregistre.</td></tr>
+              <tr><td colSpan="7" className="px-6 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Aucun agent enregistre.</td></tr>
             ) : agents.map(agent => (
               <tr key={agent.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border-subtle)' }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
@@ -126,6 +139,14 @@ function Agents() {
                 <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-secondary)' }}>{agent.phone}</td>
                 <td className="px-6 py-4">{roleBadge(agent.role)}</td>
                 <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-secondary)' }}>{agent.kiosk_name || '-'}</td>
+                <td className="px-6 py-4">
+                  {agent.kiosk_code ? (
+                    <span className="text-xs font-mono font-bold px-2.5 py-1 rounded tracking-widest"
+                      style={{ background: 'var(--bg-elevated)', color: 'var(--accent)', border: '1px solid var(--border-subtle)' }}>
+                      {agent.kiosk_code}
+                    </span>
+                  ) : <span className="text-xs" style={{ color: 'var(--text-muted)' }}>-</span>}
+                </td>
                 <td className="px-6 py-4">{statusBadge(agent.is_suspended)}</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-1.5">
@@ -205,7 +226,7 @@ function Agents() {
                 <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{selectedAgent.phone}</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 mb-5">
+            <div className="grid grid-cols-2 gap-3 mb-4">
               {[
                 ['Role', selectedAgent.role],
                 ['Solde', agentDetail?.caisse?.balance !== 'N/A' ? `${(agentDetail?.caisse?.balance || 0).toLocaleString()} XAF` : 'N/A'],
@@ -217,6 +238,24 @@ function Agents() {
                   <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{v}</p>
                 </div>
               ))}
+            </div>
+
+            {/* Kiosk code panel */}
+            <div className="p-3 rounded-lg mb-5 flex items-center justify-between"
+              style={{ background: 'var(--bg-base)', border: '1px solid var(--border-subtle)' }}>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Code Kiosque (Unity)</p>
+                <span className="text-base font-mono font-bold px-3 py-1 rounded tracking-widest"
+                  style={{ background: 'var(--bg-elevated)', color: 'var(--accent)', border: '1px solid var(--border-subtle)' }}>
+                  {selectedAgent.kiosk_code || '-'}
+                </span>
+              </div>
+              <button onClick={() => regenerateKioskCode(selectedAgent)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
+                style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
+                title="Generer un nouveau code (invalide l'ancien)">
+                <RefreshCw size={13} /> Regenerer
+              </button>
             </div>
             <div className="flex gap-3">
               <button onClick={() => { setShowDetailModal(false); openProvision(selectedAgent); }}

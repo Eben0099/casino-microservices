@@ -120,6 +120,34 @@ const Layout = () => {
               {now.toLocaleTimeString(locale, { hour12: false })}
             </div>
 
+            {/* Kiosk code badge */}
+            {user?.kiosk_code && (
+              <div
+                title={t('layout.kioskCodeTooltip')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 12px', borderRadius: 6,
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-elevated)',
+                  lineHeight: 1.1,
+                }}
+              >
+                <span style={{
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
+                  textTransform: 'uppercase', color: 'var(--text-muted)',
+                }}>
+                  {t('layout.kioskCode')}
+                </span>
+                <span style={{
+                  fontSize: 14, fontWeight: 800, color: 'var(--accent)',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  letterSpacing: '0.15em',
+                }}>
+                  {user.kiosk_code}
+                </span>
+              </div>
+            )}
+
             {/* User */}
             <div style={{ textAlign: 'right', lineHeight: 1.15 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>

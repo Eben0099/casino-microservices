@@ -21,12 +21,18 @@ from .models import Ticket, TicketBet, TicketStatus
 from .schemas import TicketCreate, TicketResponse
 from .rules import calculate_payout
 from .security import get_current_agent_id, verify_admin_key
+from .jackpot import services as jackpot_services
 from sqlalchemy import func
 
 app = FastAPI(
     title="AGDTech Ticket Service",
     root_path=os.getenv("ROOT_PATH", "")
 )
+
+# Module jackpot : routes admin + publiques (cf docs/jackpot-system.md)
+from .jackpot.routes import admin_router as jackpot_admin_router, public_router as jackpot_public_router
+app.include_router(jackpot_admin_router)
+app.include_router(jackpot_public_router)
 
 @app.get("/status", tags=["Health"])
 async def health_check():
@@ -70,11 +76,14 @@ async def process_settlement(round_id: str, winning_number: str):
     """Calcule les gains et met à jour la base de données"""
     # On utilise AsyncSessionLocal pour ouvrir une connexion hors requête HTTP
     async with AsyncSessionLocal() as db:
-        # 1. On récupère tous les tickets PENDING de ce tour, avec leurs paris (bets)
+        # 1. Tickets de ce tour pas encore regles (PENDING ou deja WON via jackpot)
         result = await db.execute(
             select(Ticket)
             .options(selectinload(Ticket.bets))
-            .where(Ticket.round_id == round_id, Ticket.status == TicketStatus.PENDING)
+            .where(
+                Ticket.round_id == round_id,
+                Ticket.status.in_([TicketStatus.PENDING, TicketStatus.WON]),
+            )
         )
         tickets_to_process = result.scalars().all()
 
@@ -85,7 +94,7 @@ async def process_settlement(round_id: str, winning_number: str):
         processed = 0
         for ticket in tickets_to_process:
             try:
-                total_payout = 0
+                roulette_payout = 0
                 ticket.winning_number = str(winning_number)
 
                 # 2. On calcule le gain de chaque ligne de pari
@@ -93,17 +102,19 @@ async def process_settlement(round_id: str, winning_number: str):
                     payout = calculate_payout(bet.bet_type, bet.bet_target, bet.amount, winning_number)
                     bet.payout = payout
                     bet.is_winning = (payout > 0)
-                    total_payout += payout
+                    roulette_payout += payout
 
-                # 3. On détermine le nouveau statut du ticket
-                new_status = TicketStatus.WON if total_payout > 0 else TicketStatus.LOST
+                # 3. On ADDITIONNE au total_payout (qui peut deja contenir un gain jackpot)
+                ticket.total_payout = (ticket.total_payout or 0) + roulette_payout
 
-                # 4. On met à jour le ticket
-                ticket.status = new_status
-                ticket.total_payout = total_payout
+                # 4. Statut final : WON si total > 0 (roulette OU jackpot), sinon LOST
+                ticket.status = TicketStatus.WON if ticket.total_payout > 0 else TicketStatus.LOST
                 processed += 1
 
-                logger.info(f"SETTLEMENT ticket={ticket.short_code} status={new_status.value} payout={total_payout}")
+                logger.info(
+                    f"SETTLEMENT ticket={ticket.short_code} status={ticket.status.value} "
+                    f"roulette_payout={roulette_payout} total_payout={ticket.total_payout}"
+                )
             except Exception as e:
                 logger.error(f"SETTLEMENT_ERROR ticket={ticket.short_code} error={e}")
 
@@ -281,10 +292,28 @@ async def create_ticket(
                 detail="Le service de caisse est indisponible ou n'a pas pu traiter la mise."
             )
 
-    # 6. Finalisation
+    # 6. Hook jackpot : alimentation des pots eligibles + detection HIT.
+    #    Toute exception ici declenche un rollback complet (vente + contribs)
+    #    pour rester coherent avec l'argent debite cote caisse.
+    try:
+        hits = await jackpot_services.contribute_for_ticket(db, new_ticket)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"TICKET_CREATE_JACKPOT_FAIL code={short_code} error={e}")
+        raise HTTPException(status_code=500, detail="Erreur jackpot lors de la creation du ticket.")
+
+    # 7. Finalisation
     await db.commit()
 
-    logger.info(f"TICKET_CREATED code={short_code} agent={ticket_in.agent_id} wager={total_wager} round={ticket_in.round_id} bets={len(ticket_in.bets)}")
+    logger.info(
+        f"TICKET_CREATED code={short_code} agent={ticket_in.agent_id} wager={total_wager} "
+        f"round={ticket_in.round_id} bets={len(ticket_in.bets)} jackpot_hits={len(hits)}"
+    )
+    for h in hits:
+        logger.info(
+            f"JACKPOT_HIT_ON_CREATE pot={h.pot.id} ticket_winner={h.winner_ticket_id} "
+            f"payout={h.payout} trigger_ticket={new_ticket.short_code}"
+        )
 
     # Recharge avec relations (bets) pour la réponse JSON (INDISPENSABLE en async)
     result = await db.execute(
@@ -379,6 +408,82 @@ async def get_ticket_by_code(
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket introuvable.")
     return ticket
+
+@app.post("/{short_code}/cancel")
+async def cancel_ticket(
+    short_code: str,
+    db: AsyncSession = Depends(get_db),
+    agent_id: str = Depends(get_current_agent_id),
+):
+    """Annule un ticket : rollback des contributions jackpot + remboursement caisse.
+
+    Refuse si:
+      - ticket inexistant
+      - ticket deja PAID/CANCELLED/LOST
+      - ticket deja en WON (un gain a ete attache, le rollback contributions risque
+        d'etre incoherent avec la prime jackpot eventuelle)
+    """
+    result = await db.execute(select(Ticket).where(Ticket.short_code == short_code))
+    ticket = result.scalars().first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable.")
+    if str(ticket.agent_id) != agent_id:
+        raise HTTPException(status_code=403, detail="Vous n'etes pas proprietaire de ce ticket.")
+    if ticket.status != TicketStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Annulation impossible (statut: {ticket.status.value}).",
+        )
+
+    # 1. Rollback contributions jackpot (refuse 409 si un HIT a deja eu lieu)
+    try:
+        pots_touched = await jackpot_services.rollback_for_ticket(db, ticket.id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"TICKET_CANCEL_JACKPOT_FAIL code={short_code} error={e}")
+        raise HTTPException(status_code=500, detail="Erreur jackpot lors de l'annulation.")
+
+    # 2. Remboursement de la caisse caissier
+    agent_base = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8000")
+    agent_url = f"{agent_base}/{ticket.agent_id}/provision"
+    admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                agent_url,
+                json={
+                    "amount": -ticket.total_wager,
+                    "tx_type": "REVERSAL",
+                    "description": f"Annulation Ticket {short_code}",
+                    "reference": short_code,
+                },
+                headers={"X-API-Key": admin_key},
+                timeout=5.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            await db.rollback()
+            logger.error(f"TICKET_CANCEL_REVERSAL_FAIL code={short_code} error={e}")
+            raise HTTPException(status_code=503, detail="Erreur lors du remboursement de la caisse.")
+
+    # 3. Statut final
+    ticket.status = TicketStatus.CANCELLED
+    await db.commit()
+
+    logger.info(
+        f"TICKET_CANCELLED code={short_code} agent={ticket.agent_id} wager={ticket.total_wager} "
+        f"pots_rolled_back={pots_touched}"
+    )
+
+    return {
+        "status": "success",
+        "message": f"Ticket {short_code} annule, {ticket.total_wager} XAF retournes a la caisse.",
+        "pots_rolled_back": pots_touched,
+    }
+
 
 @app.post("/{short_code}/payout")
 async def payout_ticket(

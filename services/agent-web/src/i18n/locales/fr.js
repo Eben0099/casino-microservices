@@ -121,6 +121,8 @@ export const fr = {
     cash: 'CASH (0)',
     cashierFallback: 'Caissière',
     cashierPrefix: 'Caissière',
+    kioskCode: 'Kiosque',
+    kioskCodeTooltip: 'Code public du kiosque (utilisé par l\'écran Unity)',
   },
   jeux: {
     insufficientBalance: 'Solde insuffisant dans la caisse !',
@@ -213,6 +215,26 @@ export const fr = {
     closeTitle: 'Fermer (Échap)',
     closeAria: 'Fermer',
     round: 'Round',
+  },
+  jackpots: {
+    bar: { title: 'Cagnottes en jeu' },
+    scope: {
+      GLOBAL: 'Jackpot général',
+      GAME: 'Jeu',
+      LOCAL: 'Local',
+    },
+    tier: {
+      BRONZE: 'Bronze',
+      SILVER: 'Argent',
+      GOLD: 'Or',
+    },
+    hit: {
+      title: 'JACKPOT !',
+      subtitle: 'Félicitations, votre ticket vient de remporter une cagnotte !',
+      payoutLabel: 'Gain',
+      ticket: 'Ticket',
+      dismiss: 'Continuer',
+    },
   },
   // Internal locale tag for Intl APIs (number/date/time formatting)
   intl: { locale: 'fr-FR' },

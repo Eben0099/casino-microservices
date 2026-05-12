@@ -17,12 +17,26 @@ class AgentResponse(BaseModel):
     display_name: str
     kiosk_name: Optional[str]
     kiosk_location: Optional[str]
+    kiosk_code: Optional[str] = None
     role: AgentRole
     is_active: bool = True
     is_suspended: bool = False
 
     class Config:
         from_attributes = True
+
+
+class KiosqueLookupResponse(BaseModel):
+    """Reponse publique pour le frontend Unity (`GET /by-code/{code}`).
+
+    Aucune donnee sensible : ni hash, ni telephone, ni solde.
+    """
+    agent_id: UUID4
+    kiosk_code: str
+    kiosk_name: Optional[str]
+    kiosk_location: Optional[str]
+    is_active: bool
+    is_suspended: bool
 
 class AgentUpdate(BaseModel):
     display_name: Optional[str] = None

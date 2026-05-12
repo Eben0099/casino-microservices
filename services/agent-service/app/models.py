@@ -33,6 +33,8 @@ class Agent(Base):
     # Infos Kiosque
     kiosk_name = Column(String(100), nullable=True)
     kiosk_location = Column(String(200), nullable=True)
+    # Alias public court (4 caracteres) consomme par le frontend Unity.
+    kiosk_code = Column(String(4), unique=True, index=True, nullable=True)
     
     # Hierarchie & Business
     role = Column(Enum(AgentRole), default=AgentRole.AGENT, nullable=False)

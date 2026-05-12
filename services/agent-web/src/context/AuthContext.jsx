@@ -12,6 +12,14 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await agentApi.getDetails(agentId);
       setBalance(res.data.caisse.balance);
+      const a = res.data.agent || {};
+      setUser(prev => {
+        if (!prev) return prev;
+        if (prev.kiosk_code === a.kiosk_code && prev.kiosk_name === a.kiosk_name) return prev;
+        const next = { ...prev, kiosk_code: a.kiosk_code, kiosk_name: a.kiosk_name };
+        localStorage.setItem('agent_user', JSON.stringify(next));
+        return next;
+      });
     } catch (err) {
       console.error("Erreur balance:", err);
     }
@@ -29,12 +37,12 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (phone, password) => {
     const res = await agentApi.login(phone, password);
-    const { access_token, agent_id, agent_name } = res.data;
-    
-    const userData = { id: agent_id, name: agent_name, phone: phone };
+    const { access_token, agent_id, agent_name, kiosk_code, kiosk_name } = res.data;
+
+    const userData = { id: agent_id, name: agent_name, phone: phone, kiosk_code, kiosk_name };
     localStorage.setItem('agent_token', access_token);
     localStorage.setItem('agent_user', JSON.stringify(userData));
-    
+
     setUser(userData);
     await fetchBalance(agent_id);
   };

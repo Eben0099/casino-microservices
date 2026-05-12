@@ -50,3 +50,7 @@ class TicketBet(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     ticket = relationship("Ticket", back_populates="bets")
+
+
+# Enregistre les modeles jackpot sur la meme Base pour qu'Alembic les detecte.
+from .jackpot import models as _jackpot_models  # noqa: F401, E402

@@ -7,6 +7,7 @@ import { useTheme } from '../contexts/ThemeContext';
 const NAV_ITEMS = [
   { label: "Vue d'ensemble", path: '/dashboard' },
   { label: 'Jeux',            path: '/roulette'  },
+  { label: 'Jackpots',        path: '/jackpots'  },
   { label: 'Caissiers',       path: '/agents'    },
   { label: 'Betslip',         path: '/transactions' },
   { label: 'Paramètres',      path: '/parametres' },

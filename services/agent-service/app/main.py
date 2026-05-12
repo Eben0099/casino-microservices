@@ -12,8 +12,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelna
 
 from .database import get_db
 from .models import Agent, CashRegister, CashRegisterTransaction, CashTxType
-from .schemas import AgentCreate, AgentResponse, ProvisionRequest, AgentUpdate, AgentListResponse, LoginRequest
+from .schemas import (
+    AgentCreate, AgentResponse, ProvisionRequest, AgentUpdate,
+    AgentListResponse, LoginRequest, KiosqueLookupResponse,
+)
 from .security import create_access_token, get_current_agent_id, verify_admin_key
+from .kiosk_codes import generate_unique_kiosk_code
 
 app = FastAPI(
     title="AGDTech Agent & Cash Service",
@@ -83,6 +87,46 @@ async def get_agent_details_admin(agent_id: UUID, db: AsyncSession = Depends(get
         }
     }
 
+@app.post("/admin/{agent_id}/regenerate-code", response_model=AgentResponse, dependencies=[Depends(verify_admin_key)])
+async def regenerate_kiosk_code(agent_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Regenere le code court du kiosque d'un agent (Reserve au Backoffice)."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalars().first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent introuvable")
+
+    new_code = await generate_unique_kiosk_code(db)
+    agent.kiosk_code = new_code
+    await db.commit()
+    await db.refresh(agent)
+    logger.info(f"KIOSK_CODE_REGENERATED agent={agent.id} new_code={new_code}")
+    return agent
+
+
+@app.get("/by-code/{code}", response_model=KiosqueLookupResponse)
+async def kiosk_by_code(code: str, db: AsyncSession = Depends(get_db)):
+    """Recherche publique d'un kiosque par son code court.
+
+    Consommee par le frontend Unity pour s'amorcer au demarrage.
+    Aucune donnee sensible n'est exposee.
+    """
+    code = (code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code kiosque vide")
+    result = await db.execute(select(Agent).where(Agent.kiosk_code == code))
+    agent = result.scalars().first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Aucun kiosque trouve pour ce code")
+    return KiosqueLookupResponse(
+        agent_id=agent.id,
+        kiosk_code=agent.kiosk_code,
+        kiosk_name=agent.kiosk_name,
+        kiosk_location=agent.kiosk_location,
+        is_active=agent.is_active,
+        is_suspended=agent.is_suspended,
+    )
+
+
 @app.patch("/admin/{agent_id}", response_model=AgentResponse, dependencies=[Depends(verify_admin_key)])
 async def update_agent_admin(agent_id: UUID, update_data: AgentUpdate, db: AsyncSession = Depends(get_db)):
     """Met a jour un agent (Reserve au Backoffice)"""
@@ -116,13 +160,17 @@ async def register_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_d
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(agent_in.password.encode('utf-8'), salt).decode('utf-8')
     
-    # 3. Créer l'Agent
+    # 3. Générer un code kiosque court unique (alias public pour Unity)
+    kiosk_code = await generate_unique_kiosk_code(db)
+
+    # 4. Créer l'Agent
     new_agent = Agent(
         phone=agent_in.phone,
         display_name=agent_in.display_name,
         password_hash=hashed_password,
         kiosk_name=agent_in.kiosk_name,
         kiosk_location=agent_in.kiosk_location,
+        kiosk_code=kiosk_code,
         role=agent_in.role
     )
     db.add(new_agent)
@@ -154,13 +202,17 @@ async def create_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_db)
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(agent_in.password.encode('utf-8'), salt).decode('utf-8')
     
-    # 3. Créer l'Agent
+    # 3. Générer un code kiosque court unique (alias public pour Unity)
+    kiosk_code = await generate_unique_kiosk_code(db)
+
+    # 4. Créer l'Agent
     new_agent = Agent(
         phone=agent_in.phone,
         display_name=agent_in.display_name,
         password_hash=hashed_password,
         kiosk_name=agent_in.kiosk_name,
         kiosk_location=agent_in.kiosk_location,
+        kiosk_code=kiosk_code,
         role=agent_in.role
     )
     db.add(new_agent)
@@ -325,10 +377,12 @@ async def login_agent(request: LoginRequest, db: AsyncSession = Depends(get_db))
     # 2. On génère le token avec l'ID de l'agent stocké dans le champ "sub" (Subject)
     access_token = create_access_token(data={"sub": str(agent.id)})
     
-    # 3. On renvoie le token au format standard OAuth2
+    # 3. On renvoie le token + infos kiosque (consommees par le caissier)
     return {
-        "access_token": access_token, 
+        "access_token": access_token,
         "token_type": "bearer",
         "agent_id": str(agent.id),
-        "agent_name": agent.display_name 
+        "agent_name": agent.display_name,
+        "kiosk_code": agent.kiosk_code,
+        "kiosk_name": agent.kiosk_name,
     }

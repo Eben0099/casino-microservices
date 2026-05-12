@@ -121,6 +121,8 @@ export const en = {
     cash: 'CASH (0)',
     cashierFallback: 'Cashier',
     cashierPrefix: 'Cashier',
+    kioskCode: 'Kiosk',
+    kioskCodeTooltip: 'Public kiosk code (used by the Unity display)',
   },
   jeux: {
     insufficientBalance: 'Insufficient till balance!',
@@ -213,6 +215,26 @@ export const en = {
     closeTitle: 'Close (Esc)',
     closeAria: 'Close',
     round: 'Round',
+  },
+  jackpots: {
+    bar: { title: 'Live jackpots' },
+    scope: {
+      GLOBAL: 'Grand Jackpot',
+      GAME: 'Game',
+      LOCAL: 'Local',
+    },
+    tier: {
+      BRONZE: 'Bronze',
+      SILVER: 'Silver',
+      GOLD: 'Gold',
+    },
+    hit: {
+      title: 'JACKPOT !',
+      subtitle: 'Congratulations — this ticket just hit a jackpot!',
+      payoutLabel: 'Payout',
+      ticket: 'Ticket',
+      dismiss: 'Continue',
+    },
   },
   intl: { locale: 'en-US' },
 };
