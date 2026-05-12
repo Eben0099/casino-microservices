@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, ArrowUpCircle, ArrowDownCircle, Receipt, Coins, Ban, Wallet, Percent, Layers } from 'lucide-react';
+import { RefreshCw, ArrowUpCircle, ArrowDownCircle, Receipt, Coins, Ban, Wallet, Percent, Layers, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import axios from 'axios';
 import TicketReceipt from '../components/TicketReceipt';
+
+const PAGE_SIZE = 10;
 
 const TICKET_RE = /^TK-\d{8}-[A-Z0-9]+$/i;
 const TICKET_INLINE_RE = /TK-\d{8}-[A-Z0-9]+/i;
@@ -54,6 +56,19 @@ function Transactions() {
   const [ticketError, setTicketError] = useState('');
   const [activeTab, setActiveTab] = useState('all');
 
+  // Filters
+  const [qAgent, setQAgent] = useState('');
+  const [qTicket, setQTicket] = useState('');
+  const [qRef, setQRef] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [page, setPage] = useState(1);
+
+  const clearFilters = () => {
+    setQAgent(''); setQTicket(''); setQRef(''); setDateFrom(''); setDateTo('');
+  };
+  const hasFilters = !!(qAgent || qTicket || qRef || dateFrom || dateTo);
+
   const fetchAll = async () => {
     setLoading(true);
     try {
@@ -81,18 +96,46 @@ function Transactions() {
     }
   };
 
-  // Per-tab stats (count + sum amount)
+  // Apply text/date filters first, then per-tab type filter
+  const matchesFilters = (tx) => {
+    if (qAgent && !(tx.agent_name || '').toLowerCase().includes(qAgent.toLowerCase())) return false;
+    if (qTicket) {
+      const code = extractTicketCode(tx);
+      if (!code || !code.toLowerCase().includes(qTicket.toLowerCase())) return false;
+    }
+    if (qRef) {
+      const blob = `${tx.reference || ''} ${tx.description || ''}`.toLowerCase();
+      if (!blob.includes(qRef.toLowerCase())) return false;
+    }
+    if (dateFrom) {
+      const d = new Date(tx.created_at);
+      if (d < new Date(dateFrom)) return false;
+    }
+    if (dateTo) {
+      const d = new Date(tx.created_at);
+      const end = new Date(dateTo); end.setHours(23, 59, 59, 999);
+      if (d > end) return false;
+    }
+    return true;
+  };
+
+  const baseFiltered = useMemo(
+    () => transactions.filter(matchesFilters),
+    [transactions, qAgent, qTicket, qRef, dateFrom, dateTo],
+  );
+
+  // Per-tab stats — counts respect text/date filters so the badges stay coherent
   const tabStats = useMemo(() => {
     const map = {};
     for (const t of TABS) {
-      const filtered = t.types == null ? transactions : transactions.filter(tx => t.types.includes(tx.tx_type));
+      const filtered = t.types == null ? baseFiltered : baseFiltered.filter(tx => t.types.includes(tx.tx_type));
       map[t.id] = {
         count: filtered.length,
         sum: filtered.reduce((acc, tx) => acc + (tx.amount || 0), 0),
       };
     }
     return map;
-  }, [transactions]);
+  }, [baseFiltered]);
 
   // KPI top-strip — meme source que la navbar pour eviter les divergences
   const summary = useMemo(() => {
@@ -106,8 +149,16 @@ function Transactions() {
 
   const activeTabDef = TABS.find(t => t.id === activeTab);
   const filteredTx = activeTabDef.types == null
-    ? transactions
-    : transactions.filter(tx => activeTabDef.types.includes(tx.tx_type));
+    ? baseFiltered
+    : baseFiltered.filter(tx => activeTabDef.types.includes(tx.tx_type));
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredTx.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * PAGE_SIZE;
+  const pageTx = filteredTx.slice(pageStart, pageStart + PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [activeTab, qAgent, qTicket, qRef, dateFrom, dateTo]);
 
   const txBadge = (type) => {
     const c = TX_COLOR[type] || 'var(--text-muted)';
@@ -141,6 +192,31 @@ function Transactions() {
         <KpiCard label="Total encaissé" value={`${fmt(summary.totalIn)} XAF`}  accent="var(--green)" />
         <KpiCard label="Total payé"     value={`${fmt(summary.totalOut)} XAF`} accent="var(--red)"   />
         <KpiCard label="GGR"            value={`${fmt(summary.ggr)} XAF`}      accent={summary.ggr >= 0 ? 'var(--green)' : 'var(--red)'} />
+      </div>
+
+      {/* Filters */}
+      <div className="rounded-xl p-3 mb-4"
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 items-end">
+          <FilterInput icon={Search} placeholder="Caissier / agent" value={qAgent} onChange={setQAgent} />
+          <FilterInput icon={Search} placeholder="Code ticket (TK-...)" value={qTicket} onChange={setQTicket} />
+          <FilterInput icon={Search} placeholder="Référence / description" value={qRef} onChange={setQRef} />
+          <FilterDate label="Du" value={dateFrom} onChange={setDateFrom} />
+          <FilterDate label="Au" value={dateTo}   onChange={setDateTo} />
+        </div>
+        {hasFilters && (
+          <div className="flex items-center justify-between mt-2 pt-2"
+            style={{ borderTop: '1px dashed var(--border-subtle)' }}>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {filteredTx.length} mouvement{filteredTx.length > 1 ? 's' : ''} après filtrage
+            </span>
+            <button onClick={clearFilters}
+              className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md"
+              style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}>
+              <X size={11} /> Effacer les filtres
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -191,9 +267,9 @@ function Transactions() {
               <tr><td colSpan="7" className="px-6 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Chargement…</td></tr>
             ) : filteredTx.length === 0 ? (
               <tr><td colSpan="7" className="px-6 py-10 text-center text-sm italic" style={{ color: 'var(--text-muted)' }}>
-                Aucun mouvement dans cette catégorie.
+                {hasFilters ? 'Aucun mouvement ne correspond aux filtres.' : 'Aucun mouvement dans cette catégorie.'}
               </td></tr>
-            ) : filteredTx.map(tx => {
+            ) : pageTx.map(tx => {
               const ticketCode = extractTicketCode(tx);
               const hasTicket = !!ticketCode;
               return (
@@ -227,6 +303,27 @@ function Transactions() {
             })}
           </tbody>
         </table>
+
+        {/* Pagination footer */}
+        {!loading && filteredTx.length > 0 && (
+          <div className="flex items-center justify-between px-6 py-3 text-sm"
+            style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
+            <span>
+              {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filteredTx.length)} sur {filteredTx.length}
+            </span>
+            <div className="flex items-center gap-1">
+              <PagerBtn disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+                <ChevronLeft size={14} />
+              </PagerBtn>
+              <span className="px-3 font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
+                {safePage} / {totalPages}
+              </span>
+              <PagerBtn disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
+                <ChevronRight size={14} />
+              </PagerBtn>
+            </div>
+          </div>
+        )}
       </div>
 
       {ticketError && (
@@ -249,6 +346,48 @@ const KpiCard = ({ label, value, accent }) => (
     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-1" style={{ color: 'var(--text-muted)' }}>{label}</p>
     <p className="text-xl font-bold tabular-nums" style={{ color: accent }}>{value}</p>
   </div>
+);
+
+const FilterInput = ({ icon: Icon, placeholder, value, onChange }) => (
+  <div className="relative">
+    <Icon size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+    <input
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full pl-8 pr-2 py-2 text-sm rounded-md outline-none"
+      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+    />
+  </div>
+);
+
+const FilterDate = ({ label, value, onChange }) => (
+  <div className="flex items-center gap-1.5">
+    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</span>
+    <input
+      type="date"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="flex-1 px-2 py-2 text-sm rounded-md outline-none"
+      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+    />
+  </div>
+);
+
+const PagerBtn = ({ disabled, onClick, children }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className="flex items-center justify-center w-8 h-8 rounded-md transition-colors"
+    style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border-subtle)',
+      color: disabled ? 'var(--text-muted)' : 'var(--text-primary)',
+      opacity: disabled ? 0.5 : 1,
+      cursor: disabled ? 'not-allowed' : 'pointer',
+    }}>
+    {children}
+  </button>
 );
 
 export default Transactions;
