@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
 import { getNumberAtCoord, getCoordOfNumber, RED_NUMBERS } from './RouletteHelpers';
+import { useT } from '../i18n';
+
+// 6 wheel sectors of 6 numbers each, sliced from the European wheel order
+// starting after 0. Mirrors backend SECTORS in ticket-service/app/rules.py.
+const WHEEL_SECTORS = {
+  A: [32, 15, 19, 4, 21, 2],
+  B: [25, 17, 34, 6, 27, 13],
+  C: [36, 11, 30, 8, 23, 10],
+  D: [5, 24, 16, 33, 1, 20],
+  E: [14, 31, 9, 22, 18, 29],
+  F: [7, 28, 12, 35, 3, 26],
+};
 
 /* --------------------------------------------------------------------
  * BettingGrid — European roulette tapis with optional bet-mode lock.
@@ -15,6 +27,7 @@ import { getNumberAtCoord, getCoordOfNumber, RED_NUMBERS } from './RouletteHelpe
 
 const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
   const [hovered, setHovered] = useState(null);
+  const { t } = useT();
   const disabled = !isBettingOpen;
   const isRed = (n) => RED_NUMBERS.includes(n);
 
@@ -88,11 +101,70 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
     transition: 'opacity 0.2s, filter 0.2s',
   });
 
+  // Derive the currently hovered number (if a cell is being pointed at) so
+  // STREET / SIX_LINE modes can light up the whole bet group, not just one cell.
+  const hoveredNumber = hovered && hovered.startsWith('n-')
+    ? parseInt(hovered.slice(2), 10)
+    : null;
+  const hoveredCoord = (hoveredNumber != null && !Number.isNaN(hoveredNumber) && hoveredNumber >= 1)
+    ? getCoordOfNumber(hoveredNumber)
+    : null;
+
+  // When the user hovers an OUTSIDE bet button (HIGH/LOW, RED/BLACK, EVEN/ODD,
+  // dozens, 2:1 columns, sectors A-F), light up the numbered cells that the
+  // bet covers — same UX as STREET/SIX_LINE cell-group hover.
+  const inHoveredOutsideGroup = (n) => {
+    if (!hovered) return false;
+    switch (hovered) {
+      case 'low':
+      case 'low-row':
+        return n >= 1 && n <= 18;
+      case 'high':
+      case 'high-row':
+        return n >= 19 && n <= 36;
+      case 'even':
+        return n % 2 === 0;
+      case 'odd':
+        return n % 2 === 1;
+      case 'red':
+        return RED_NUMBERS.includes(n);
+      case 'black':
+        return !RED_NUMBERS.includes(n);
+      case 'dz-1st':
+        return n >= 1 && n <= 12;
+      case 'dz-2nd':
+        return n >= 13 && n <= 24;
+      case 'dz-3rd':
+        return n >= 25 && n <= 36;
+      case 'Col1':
+        return n % 3 === 1;
+      case 'Col2':
+        return n % 3 === 2;
+      case 'Col3':
+        return n % 3 === 0;
+      default:
+        if (hovered.startsWith('sector-')) {
+          const letter = hovered.slice(7);
+          return WHEEL_SECTORS[letter]?.includes(n) ?? false;
+        }
+        if (hovered.startsWith('hc-')) {
+          // Combination LOW/HIGH × RED/BLACK — 9 numbers each
+          const combo = hovered.slice(3); // LOW_RED | LOW_BLACK | HIGH_RED | HIGH_BLACK
+          const [half, color] = combo.split('_');
+          const inHalf = half === 'LOW' ? (n >= 1 && n <= 18) : (n >= 19 && n <= 36);
+          const isRed = RED_NUMBERS.includes(n);
+          const inColor = color === 'RED' ? isRed : !isRed;
+          return inHalf && inColor;
+        }
+        return false;
+    }
+  };
+
   // Number cell — dimmed if cells aren't clickable in this mode
   const NumCell = ({ num }) => {
     const { col, row } = getCoordOfNumber(num);
     const red = isRed(num);
-    const isH = hovered === `n-${num}`;
+    const isDirectHover = hovered === `n-${num}`;
     const bg = red ? RED : BLACK;
     const bgH = red ? RED_HOVER : BLACK_HOVER;
 
@@ -100,8 +172,41 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
     const localOpacity = cellLocked ? 0.45 : 1;
     const cursor = disabled || cellLocked ? 'not-allowed' : 'pointer';
 
+    // Cell-group hover : in STREET mode, all 3 cells in the same column light
+    // up. In SIX_LINE mode, the 6 cells of the relevant 2-column block do.
+    let inCellGroup = false;
+    if (!cellLocked && hoveredCoord) {
+      if (betMode === 'STREET') {
+        inCellGroup = hoveredCoord.col === col;
+      } else if (betMode === 'SIX_LINE') {
+        const baseCol = hoveredCoord.col >= 11 ? 10 : hoveredCoord.col;
+        inCellGroup = col >= baseCol && col <= baseCol + 1;
+      }
+    }
+
+    // Outside-group hover : the user hovers a HIGH / LOW / RED / BLACK /
+    // PAIR / IMPAIR / DOZEN / COLUMN / SECTOR button → all the matching
+    // numbered cells should preview which numbers the bet covers.
+    const inOutsideGroup = inHoveredOutsideGroup(num);
+
+    const isGroupMode = betMode === 'STREET' || betMode === 'SIX_LINE';
+    const showHoverFx = inOutsideGroup || (!cellLocked && (isDirectHover || inCellGroup));
+    // STRAIGHT/Tous direct hover keeps the scale pop. Group modes flatten.
+    const lift = isDirectHover && !cellLocked && !isGroupMode && !inOutsideGroup;
+    // When the outside-group preview is active, override the dimmed-locked
+    // opacity so the covered cells read clearly through the lock greyout.
+    const finalOpacity = disabled ? 0.55 : (inOutsideGroup ? 1 : localOpacity);
+
     return (
-      <div style={{ position: 'relative', height: CELL }}>
+      <div style={{
+        position: 'relative',
+        height: CELL,
+        // Place the cell at its logical roulette position so that 1 sits at
+        // bottom-left and 36 at top-right — matches the 2:1 column buttons
+        // (Col3 on top, Col1 at bottom) and the SPLIT-V handles.
+        gridRow: row + 1,
+        gridColumn: col + 1,
+      }}>
         <button
           onClick={() => handleCellClick(num, col)}
           disabled={disabled || cellLocked}
@@ -109,16 +214,16 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
           onMouseLeave={() => setHovered(null)}
           style={{
             width: '100%', height: '100%',
-            background: isH && !cellLocked ? bgH : bg,
-            border: `1px solid ${GOLD_B}`,
+            background: showHoverFx ? bgH : bg,
+            border: `1px solid ${showHoverFx ? GOLD : GOLD_B}`,
             color: '#fff', fontWeight: '800', fontSize: '1.05rem',
             cursor,
-            opacity: disabled ? 0.55 : localOpacity,
+            opacity: finalOpacity,
             textShadow: '1px 1px 2px rgba(0,0,0,0.9)',
-            transition: 'background 0.1s, transform 0.1s, box-shadow 0.1s, opacity 0.2s',
-            transform: isH && !cellLocked ? 'scale(1.15)' : 'scale(1)',
-            zIndex: isH && !cellLocked ? 10 : 1,
-            boxShadow: isH && !cellLocked
+            transition: 'background 0.1s, transform 0.1s, box-shadow 0.1s, opacity 0.2s, border-color 0.1s',
+            transform: lift ? 'scale(1.15)' : 'scale(1)',
+            zIndex: lift ? 10 : (showHoverFx ? 5 : 1),
+            boxShadow: showHoverFx
               ? `0 0 14px ${GOLD}88, 0 4px 12px rgba(0,0,0,0.5)`
               : `inset 0 1px 1px rgba(255,255,255,0.15), inset 0 -2px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.3)`,
             position: 'relative',
@@ -239,7 +344,7 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         textTransform: 'uppercase',
         boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
       }}>
-        Mode {labelOf(betMode)}
+        {t('bet.table.modeLabel', { mode: t(`bet.type.${betMode}`) })}
       </div>
     );
 
@@ -294,12 +399,13 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
           0
         </button>
 
-        {/* 1-36 grid */}
+        {/* 1-36 grid — cells placed in logical roulette positions:
+            top row = Col3 (3,6,9,...,36), bottom row = Col1 (1,4,7,...,34). */}
         <div style={{
           flex: 1, display: 'grid',
           gridTemplateColumns: 'repeat(12, 1fr)',
           gridTemplateRows: `repeat(3, ${CELL}px)`,
-          gridAutoFlow: 'column', gap: 0,
+          gap: 0,
         }}>
           {Array.from({ length: 36 }, (_, i) => <NumCell key={i + 1} num={i + 1} />)}
         </div>
@@ -343,8 +449,8 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         ...sectionDim('HALF'),
       }}>
         <div />
-        <OutBtn label="LOW"  id="low-row"  type="HALF" onClick={() => addBet('HALF', '1-18')} />
-        <OutBtn label="HIGH" id="high-row" type="HALF" onClick={() => addBet('HALF', '19-36')} />
+        <OutBtn label={t('bet.table.low')}  id="low-row"  type="HALF" onClick={() => addBet('HALF', '1-18')} />
+        <OutBtn label={t('bet.table.high')} id="high-row" type="HALF" onClick={() => addBet('HALF', '19-36')} />
         <div />
       </div>
 
@@ -355,8 +461,12 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         ...sectionDim('DOZEN'),
       }}>
         <div />
-        {[{ l: '1re DOUZAINE', t: '1st' }, { l: '2e DOUZAINE', t: '2nd' }, { l: '3e DOUZAINE', t: '3rd' }].map(d => (
-          <OutBtn key={d.t} label={d.l} id={`dz-${d.t}`} type="DOZEN" onClick={() => addBet('DOZEN', d.t)} />
+        {[
+          { l: t('bet.dozen.short1'), tgt: '1st' },
+          { l: t('bet.dozen.short2'), tgt: '2nd' },
+          { l: t('bet.dozen.short3'), tgt: '3rd' },
+        ].map(d => (
+          <OutBtn key={d.tgt} label={d.l} id={`dz-${d.tgt}`} type="DOZEN" onClick={() => addBet('DOZEN', d.tgt)} />
         ))}
         <div />
       </div>
@@ -367,12 +477,89 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         position: 'relative', zIndex: 1,
       }}>
         <div />
-        <OutBtn label="1-18"   id="low"   type="HALF"     onClick={() => addBet('HALF', '1-18')} />
-        <OutBtn label="PAIR"   id="even"  type="EVEN_ODD" onClick={() => addBet('EVEN_ODD', 'EVEN')} />
+        <OutBtn label="1-18"             id="low"   type="HALF"     onClick={() => addBet('HALF', '1-18')} />
+        <OutBtn label={t('bet.table.even')} id="even"  type="EVEN_ODD" onClick={() => addBet('EVEN_ODD', 'EVEN')} />
         <OutBtn id="red"   bg={RED}   type="COLOR" onClick={() => addBet('COLOR', 'RED')}><Diamond /></OutBtn>
         <OutBtn id="black" bg={BLACK} type="COLOR" onClick={() => addBet('COLOR', 'BLACK')}><Diamond /></OutBtn>
-        <OutBtn label="IMPAIR" id="odd"   type="EVEN_ODD" onClick={() => addBet('EVEN_ODD', 'ODD')} />
-        <OutBtn label="19-36"  id="high"  type="HALF"     onClick={() => addBet('HALF', '19-36')} />
+        <OutBtn label={t('bet.table.odd')}  id="odd"   type="EVEN_ODD" onClick={() => addBet('EVEN_ODD', 'ODD')} />
+        <OutBtn label="19-36"            id="high"  type="HALF"     onClick={() => addBet('HALF', '19-36')} />
+        <div />
+      </div>
+
+      {/* Half × Color combination — 4 bets covering 9 numbers each, payout x4.
+          LOW-RED, LOW-BLACK, HIGH-RED, HIGH-BLACK. Same RTP 97.30% as the rest. */}
+      <div style={{
+        marginTop: 6,
+        display: 'grid', gridTemplateColumns: '52px repeat(4, 1fr) 44px', gap: 0,
+        position: 'relative', zIndex: 1,
+        ...sectionDim('HALF_COLOR'),
+      }}>
+        <div />
+        {[
+          { combo: 'LOW_RED',    bg: RED,   half: t('bet.halfColor.lowShort'),  range: '1-18' },
+          { combo: 'LOW_BLACK',  bg: BLACK, half: t('bet.halfColor.lowShort'),  range: '1-18' },
+          { combo: 'HIGH_RED',   bg: RED,   half: t('bet.halfColor.highShort'), range: '19-36' },
+          { combo: 'HIGH_BLACK', bg: BLACK, half: t('bet.halfColor.highShort'), range: '19-36' },
+        ].map(({ combo, bg, half, range }) => (
+          <OutBtn
+            key={`hc-${combo}`}
+            id={`hc-${combo}`}
+            type="HALF_COLOR"
+            bg={bg}
+            h={14}
+            onClick={() => addBet('HALF_COLOR', combo)}
+          >
+            <span style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
+              fontFamily: "'Outfit', sans-serif",
+            }}>
+              <span style={{
+                fontSize: '0.85rem', fontWeight: 900, letterSpacing: '0.06em',
+              }}>
+                {half}
+              </span>
+              <span style={{
+                fontSize: '0.55rem', fontWeight: 700, opacity: 0.8,
+                letterSpacing: '0.06em', marginTop: 2,
+              }}>
+                {range} · x4
+              </span>
+            </span>
+          </OutBtn>
+        ))}
+        <div />
+      </div>
+
+      {/* Wheel sectors A-F — 6 sectors of 6 numbers each, payout x6 */}
+      <div style={{
+        marginTop: 6,
+        display: 'grid', gridTemplateColumns: '52px repeat(6, 1fr) 44px', gap: 0,
+        position: 'relative', zIndex: 1,
+        ...sectionDim('SECTOR'),
+      }}>
+        <div />
+        {['A', 'B', 'C', 'D', 'E', 'F'].map(letter => (
+          <OutBtn
+            key={`sector-${letter}`}
+            id={`sector-${letter}`}
+            type="SECTOR"
+            onClick={() => addBet('SECTOR', letter)}
+            h={14}
+          >
+            <span style={{
+              fontSize: '1.1rem', fontWeight: 900, letterSpacing: '0.04em',
+              fontFamily: "'Outfit', sans-serif",
+            }}>
+              {letter}
+            </span>
+            <span style={{
+              fontSize: '0.55rem', fontWeight: 700, opacity: 0.75,
+              letterSpacing: '0.06em',
+            }}>
+              x6
+            </span>
+          </OutBtn>
+        ))}
         <div />
       </div>
 
@@ -382,23 +569,10 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         textTransform: 'uppercase', color: `${GOLD}44`, fontWeight: '700',
         position: 'relative', zIndex: 1, fontFamily: "'Outfit', sans-serif",
       }}>
-        Roulette Européenne &mdash; AGDTech
+        {t('bet.table.branding')}
       </div>
     </div>
   );
 };
-
-const labelOf = (mode) => ({
-  STRAIGHT: 'Plein',
-  SPLIT:    'Cheval',
-  STREET:   'Transversale',
-  CORNER:   'Carré',
-  SIX_LINE: 'Sixain',
-  COLUMN:   'Colonne',
-  DOZEN:    'Douzaine',
-  COLOR:    'Couleur',
-  EVEN_ODD: 'Pair / Impair',
-  HALF:     'High / Low',
-}[mode] || mode);
 
 export default BettingGrid;

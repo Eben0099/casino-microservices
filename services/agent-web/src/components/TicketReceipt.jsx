@@ -1,32 +1,15 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Printer, X } from 'lucide-react';
-
-const BET_LABELS = {
-  STRAIGHT: 'Plein', SPLIT: 'Cheval', CORNER: 'Carre', STREET: 'Transversale',
-  SIX_LINE: 'Sixain', DOZEN: 'Douzaine', COLUMN: 'Colonne',
-  COLOR: 'Couleur', EVEN_ODD: 'Pair/Impair', HALF: 'Manque/Passe'
-};
+import { useT } from '../i18n';
 
 const BET_MULTIPLIERS = {
   STRAIGHT: 36, SPLIT: 18, STREET: 12, CORNER: 9,
-  SIX_LINE: 6, COLUMN: 3, DOZEN: 3, COLOR: 2, EVEN_ODD: 2, HALF: 2
+  SIX_LINE: 6, SECTOR: 6, HALF_COLOR: 4,
+  COLUMN: 3, DOZEN: 3, COLOR: 2, EVEN_ODD: 2, HALF: 2
 };
 
 const RED_NUMBERS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
-
-const getTargetLabel = (type, target) => {
-  if (type === 'COLOR') return target === 'RED' ? 'Rouge' : 'Noir';
-  if (type === 'EVEN_ODD') return target === 'EVEN' ? 'Pair' : 'Impair';
-  if (type === 'HALF') return target === '1-18' ? 'Manque (1-18)' : 'Passe (19-36)';
-  if (type === 'DOZEN') {
-    if (target === '1st') return '1ere Douzaine';
-    if (target === '2nd') return '2eme Douzaine';
-    return '3eme Douzaine';
-  }
-  if (type === 'COLUMN') return `Colonne ${target}`;
-  return target;
-};
 
 const getNumberColor = (n) => {
   const num = parseInt(n);
@@ -35,6 +18,18 @@ const getNumberColor = (n) => {
 };
 
 const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain = false }) => {
+  const { t, fmtN, locale } = useT();
+
+  const getTargetLabel = (type, target) => {
+    if (type === 'COLOR') return t(`bet.color.${target}`);
+    if (type === 'EVEN_ODD') return t(`bet.parity.${target}`);
+    if (type === 'HALF') return t(target === '1-18' ? 'bet.half.lowLong' : 'bet.half.highLong');
+    if (type === 'DOZEN') return t(`bet.dozen.${target}`);
+    if (type === 'COLUMN') return `${t('bet.type.COLUMN')} ${target}`;
+    if (type === 'SECTOR') return `${t('bet.sector.label')} ${target}`;
+    if (type === 'HALF_COLOR') return t(`bet.halfColor.${target}`);
+    return target;
+  };
   // ESC ferme le modal
   useEffect(() => {
     if (!ticket || !onClose) return;
@@ -74,8 +69,8 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
       {/* Close button — fixed top-right of the viewport, always reachable */}
       <button
         onClick={(e) => { e.stopPropagation(); onClose && onClose(); }}
-        title="Fermer (Échap)"
-        aria-label="Fermer"
+        title={t('ticket.closeTitle')}
+        aria-label={t('ticket.closeAria')}
         style={{
           position: 'fixed', top: 16, right: 16, zIndex: 1100,
           background: 'var(--accent)', color: 'var(--text-on-accent)',
@@ -125,10 +120,10 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
               AGDTECH
             </div>
             <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px', letterSpacing: '2px', textTransform: 'uppercase' }}>
-              Ticket de Pari Officiel
+              {t('ticket.officialLabel')}
             </div>
             <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px' }}>
-              Table Roulette 1
+              {t('ticket.tableName')}
             </div>
           </div>
 
@@ -152,8 +147,8 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b' }}>
-              <span>Round: {ticket.round_id?.replace('ROUND-', '#')}</span>
-              <span>{createdAt ? createdAt.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+              <span>{t('ticket.round')}: {ticket.round_id?.replace('ROUND-', '#')}</span>
+              <span>{createdAt ? createdAt.toLocaleString(locale, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span>
             </div>
           </div>
 
@@ -161,7 +156,7 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
           {isResolved && ticket.winning_number != null && (
             <div style={{ padding: '12px 24px', borderBottom: '1px dashed #e2e8f0', textAlign: 'center' }}>
               <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', letterSpacing: '2px', marginBottom: '6px', textTransform: 'uppercase' }}>
-                Numero Gagnant
+                {t('ticket.winningNumber')}
               </div>
               <div style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -178,11 +173,11 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
           {/* Bets detail */}
           <div style={{ padding: '14px 24px', borderBottom: '2px dashed #d1d5db' }}>
             <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', letterSpacing: '2px', marginBottom: '10px', textTransform: 'uppercase' }}>
-              Detail des paris ({ticket.bets.length})
+              {t('ticket.betsDetail', { count: ticket.bets.length })}
             </div>
 
             {ticket.bets.map((bet, idx) => {
-              const label = BET_LABELS[bet.bet_type] || bet.bet_type;
+              const label = t(`bet.typeShort.${bet.bet_type}`);
               const target = getTargetLabel(bet.bet_type, bet.bet_target);
               const mult = BET_MULTIPLIERS[bet.bet_type] || 1;
               return (
@@ -211,9 +206,9 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '13px', fontWeight: '700' }}>{bet.amount.toLocaleString()}</div>
+                    <div style={{ fontSize: '13px', fontWeight: '700' }}>{fmtN(bet.amount)}</div>
                     {bet.is_winning && bet.payout > 0 && (
-                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#16a34a' }}>+{bet.payout.toLocaleString()}</div>
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#16a34a' }}>+{fmtN(bet.payout)}</div>
                     )}
                   </div>
                 </div>
@@ -224,22 +219,22 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
           {/* Totals */}
           <div style={{ padding: '14px 24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12px', color: '#64748b' }}>
-              <span>Mise totale</span>
-              <span style={{ fontWeight: '700', color: '#1a1a1a' }}>{(ticket.total_wager || 0).toLocaleString()} XAF</span>
+              <span>{t('ticket.totalWager')}</span>
+              <span style={{ fontWeight: '700', color: '#1a1a1a' }}>{fmtN(ticket.total_wager || 0)} XAF</span>
             </div>
 
             {!isResolved && showMaxGain && (
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12px', color: '#64748b' }}>
-                <span>Gain potentiel max</span>
-                <span style={{ fontWeight: '700', color: '#f59e0b' }}>{maxGain.toLocaleString()} XAF</span>
+                <span>{t('ticket.maxPotentialGain')}</span>
+                <span style={{ fontWeight: '700', color: '#f59e0b' }}>{fmtN(maxGain)} XAF</span>
               </div>
             )}
 
             {isResolved && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b' }}>
-                <span>Gains</span>
+                <span>{t('ticket.gains')}</span>
                 <span style={{ fontWeight: '700', color: (isWon || isPaid) ? '#16a34a' : '#1a1a1a' }}>
-                  {(ticket.total_payout || 0).toLocaleString()} XAF
+                  {fmtN(ticket.total_payout || 0)} XAF
                 </span>
               </div>
             )}
@@ -269,10 +264,10 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
                 border: '2px solid #fca5a5'
               })
             }}>
-              {isWon ? 'GAGNANT' : isPaid ? 'DEJA PAYE' : 'PERDANT'}
+              {isWon ? t('ticket.won') : isPaid ? t('ticket.paid') : t('ticket.lost')}
               {(isWon || isPaid) && ticket.total_payout > 0 && (
                 <div style={{ fontSize: '24px', marginTop: '4px' }}>
-                  {ticket.total_payout.toLocaleString()} XAF
+                  {fmtN(ticket.total_payout)} XAF
                 </div>
               )}
             </div>
@@ -285,7 +280,7 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
               background: '#fef3c7', color: '#92400e', border: '2px solid #fcd34d',
               letterSpacing: '2px'
             }}>
-              EN ATTENTE DU TIRAGE
+              {t('ticket.pendingDraw')}
             </div>
           )}
 
@@ -299,7 +294,7 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
                 opacity: payoutLoading ? 0.6 : 1,
                 boxShadow: '0 4px 15px rgba(22, 163, 74, 0.4)'
               }}>
-                {payoutLoading ? 'PAIEMENT EN COURS...' : 'PAYER LE CLIENT'}
+                {payoutLoading ? t('ticket.paying') : t('ticket.payClient')}
               </button>
             </div>
           )}
@@ -309,8 +304,8 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
             padding: '12px 24px', textAlign: 'center',
             borderTop: '2px dashed #d1d5db', fontSize: '10px', color: '#94a3b8'
           }}>
-            <div>Merci pour votre confiance</div>
-            <div style={{ marginTop: '2px' }}>Conservez ce ticket pour toute reclamation</div>
+            <div>{t('ticket.thanks')}</div>
+            <div style={{ marginTop: '2px' }}>{t('ticket.keepReceipt')}</div>
             <div style={{ marginTop: '4px', fontWeight: '600', letterSpacing: '1px' }}>www.agdtech.com</div>
           </div>
 
@@ -333,14 +328,14 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
             color: '#fff', padding: '12px 22px', borderRadius: 8, cursor: 'pointer',
             display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600,
           }}>
-            <Printer size={16} /> Imprimer
+            <Printer size={16} /> {t('common.print')}
           </button>
           <button onClick={onClose} style={{
             background: 'var(--accent)', border: 'none',
             color: 'var(--text-on-accent)', padding: '12px 28px', borderRadius: 8, cursor: 'pointer',
             display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 800,
           }}>
-            <X size={16} /> Fermer
+            <X size={16} /> {t('common.close')}
           </button>
         </div>
       </div>

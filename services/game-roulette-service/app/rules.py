@@ -2,6 +2,21 @@ from typing import List, Dict, Any
 
 RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 
+# 6 sectors of 6 numbers each, sliced from the European wheel order
+# (clockwise from 0): 32 15 19 4 21 2 | 25 17 34 6 27 13 | 36 11 30 8 23 10 |
+# 5 24 16 33 1 20 | 14 31 9 22 18 29 | 7 28 12 35 3 26
+# Zero is intentionally NOT mapped: sector bets always lose on 0.
+SECTORS = {
+    "A": [32, 15, 19, 4, 21, 2],
+    "B": [25, 17, 34, 6, 27, 13],
+    "C": [36, 11, 30, 8, 23, 10],
+    "D": [5, 24, 16, 33, 1, 20],
+    "E": [14, 31, 9, 22, 18, 29],
+    "F": [7, 28, 12, 35, 3, 26],
+}
+SECTOR_LETTERS = ("A", "B", "C", "D", "E", "F")
+SECTORS_MAP = {n: i for i, letter in enumerate(SECTOR_LETTERS) for n in SECTORS[letter]}
+
 def get_number_properties(number: int) -> Dict[str, Any]:
     if number == 0:
         color = "Green"
@@ -44,16 +59,11 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
     lines = [0] * 12
 
     frequencies = [0] * 37
-    
-    # Wheel sectors layout from BACKEND_PROTOCOL.md
-    sectors_map = {
-        0: 0, 32: 0, 15: 0, 19: 0, 4: 0, 21: 0,
-        2: 1, 25: 1, 17: 1, 34: 1, 6: 1, 27: 1,
-        13: 2, 36: 2, 11: 2, 30: 2, 8: 2, 23: 2,
-        10: 3, 5: 3, 24: 3, 16: 3, 33: 3, 1: 3,
-        20: 4, 14: 4, 31: 4, 9: 4, 22: 4, 18: 4,
-        29: 5, 7: 5, 28: 5, 12: 5, 35: 5, 3: 5, 26: 5
-    }
+
+    # 6 sectors of 6 numbers each, sliced from the European wheel order
+    # starting AFTER zero. Zero itself belongs to no sector (always loses
+    # sector bets, payout x6 keeps RTP at 97.30% across all sectors).
+    sectors_map = SECTORS_MAP
 
     for n in history_numbers:
         props = get_number_properties(n)
@@ -84,8 +94,9 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
             # Lines: 12 streets of 3 numbers each ((n-1)//3 → 0..11)
             lines[(n - 1) // 3] += 1
 
-        # Sectors
-        sectors[sectors_map[n]] += 1
+        # Sectors — 0 is intentionally outside all sectors
+        if n in sectors_map:
+            sectors[sectors_map[n]] += 1
 
     # Normalization helper (Largest Remainder Method)
     def normalize_percentages(counts: List[int], div: int) -> List[float]:
@@ -119,7 +130,8 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
     cols_pct = normalize_percentages(cols, non_zero_div)
     lines_pct = normalize_percentages(lines, non_zero_div)
     
-    sectors_pct = normalize_percentages(sectors, total)
+    # Sectors sum over non-zero spins only (0 belongs to no sector)
+    sectors_pct = normalize_percentages(sectors, non_zero_div)
     
     # Hot and Cold numbers
     freq_with_num = [(frequencies[i], i) for i in range(37)]

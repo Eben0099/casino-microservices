@@ -1,6 +1,8 @@
 import React from 'react';
+import { useT } from '../i18n';
 
 const GameTile = ({ code, label, active, available, onClick }) => {
+  const { t } = useT();
   const styleActive = {
     background: 'var(--accent)',
     color: 'var(--text-on-accent)',
@@ -42,7 +44,7 @@ const GameTile = ({ code, label, active, available, onClick }) => {
           marginTop: 4, padding: '2px 6px', borderRadius: 4,
           background: 'var(--bg-elevated)', color: 'var(--text-muted)',
         }}>
-          BIENTÔT
+          {t('jeux.soonBadge')}
         </span>
       )}
     </div>

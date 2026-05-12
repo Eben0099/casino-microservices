@@ -3,6 +3,7 @@ import { CircleDot, Radio } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRoulette } from '../hooks/useRoulette';
 import { ticketApi } from '../api/endpoints';
+import { useT } from '../i18n';
 import BettingGrid from '../components/BettingGrid';
 import BetSlip from '../components/BetSlip';
 import GameTile from '../components/GameTile';
@@ -20,17 +21,18 @@ const GAMES = [
   { code: 'LO', label: 'Loto',       active: false, available: false },
 ];
 
-const phaseMap = {
-  Betting:     { label: 'Mise en cours',       color: 'var(--accent)'  },
-  BetsClosing: { label: 'Fermeture des mises', color: 'var(--accent)'  },
-  Spinning:    { label: 'Tirage…',             color: 'var(--info)'    },
-  Result:      { label: 'Résultat',            color: 'var(--success)' },
-  Maintenance: { label: 'Maintenance',         color: 'var(--text-muted)' },
+const PHASE_COLOR = {
+  Betting:     'var(--accent)',
+  BetsClosing: 'var(--accent)',
+  Spinning:    'var(--info)',
+  Result:      'var(--success)',
+  Maintenance: 'var(--text-muted)',
 };
 
 export const Jeux = () => {
   const { user, balance, fetchBalance } = useAuth();
   const { phase, remaining, gameId } = useRoulette();
+  const { t } = useT();
   const [bets, setBets] = useState([]);
   const [selectedStake, setSelectedStake] = useState(500);
   const [betMode, setBetMode] = useState(null); // null = Tous; sinon STRAIGHT, COLOR, etc.
@@ -39,7 +41,9 @@ export const Jeux = () => {
   const [error, setError] = useState('');
 
   const isBettingOpen = phase === 'Betting';
-  const phaseInfo = phaseMap[phase] || { label: 'Connexion…', color: 'var(--text-muted)' };
+  const phaseInfo = phase && PHASE_COLOR[phase]
+    ? { label: t(`phase.${phase}`), color: PHASE_COLOR[phase] }
+    : { label: t('phase.connecting'), color: 'var(--text-muted)' };
 
   const addBet = (type, target) => {
     if (!isBettingOpen) return;
@@ -60,7 +64,7 @@ export const Jeux = () => {
     if (bets.length === 0 || !isBettingOpen) return;
     const totalWager = bets.reduce((acc, b) => acc + b.amount, 0);
     if (totalWager > balance) {
-      setError('Solde insuffisant dans la caisse !');
+      setError(t('jeux.insufficientBalance'));
       setTimeout(() => setError(''), 4000);
       return;
     }
@@ -76,7 +80,7 @@ export const Jeux = () => {
       setBets([]);
       await fetchBalance(user.id);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Erreur lors de la création du ticket');
+      setError(err.response?.data?.detail || t('jeux.ticketCreationError'));
       setTimeout(() => setError(''), 4000);
     } finally {
       setLoading(false);
@@ -123,7 +127,7 @@ export const Jeux = () => {
               color: gameId ? 'var(--success)' : 'var(--text-muted)',
             }}>
               <Radio size={12} />
-              {gameId ? 'En direct' : 'Connexion…'}
+              {gameId ? t('phase.live') : t('phase.connecting')}
             </div>
           </div>
           {remaining != null && (
@@ -149,7 +153,7 @@ export const Jeux = () => {
             fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
             color: 'var(--text-muted)', textTransform: 'uppercase', whiteSpace: 'nowrap',
           }}>
-            Mise / pari
+            {t('jeux.stakePerBet')}
           </span>
           <div style={{ display: 'flex', gap: 4, flex: 1, justifyContent: 'center' }}>
             {STAKE_PRESETS.map(stake => {
@@ -197,8 +201,8 @@ export const Jeux = () => {
           submitTicket={submitTicket}
           isBettingOpen={isBettingOpen}
           loading={loading}
-          ticketLabel={`Betslip Spin & Win`}
-          shopLabel={user?.kiosk_name || user?.name || 'Caisse'}
+          ticketLabel={t('betSlip.titleWith', { game: 'Spin & Win' })}
+          shopLabel={user?.kiosk_name || user?.name || t('betSlip.shopFallback')}
           shopMeta={gameId ? `→ ${gameId}` : null}
         />
       </aside>

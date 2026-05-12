@@ -3,19 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
-
-const fmt = (n) => Math.round(n || 0).toLocaleString('fr-FR');
-
-const STATUS_LABEL = {
-  PENDING: 'En attente',
-  WON: 'Gagnant',
-  LOST: 'Perdu',
-  PAID: 'Payé',
-  CANCELLED: 'Annulé',
-};
+import { useT } from '../i18n';
 
 export const Shift = () => {
   const { logout } = useAuth();
+  const { t, fmtN, locale } = useT();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,19 +19,19 @@ export const Shift = () => {
     return now;
   });
 
-  const fetch = async () => {
+  const fetchSummary = async () => {
     setLoading(true);
     try {
       const res = await api.get('/tickets/me/shift', { params: { minutes: 720 } });
       setData(res.data);
     } catch (err) {
-      console.error('Erreur résumé service', err);
+      console.error(t('shift.loadError'), err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetch(); }, []);
+  useEffect(() => { fetchSummary(); }, []);
 
   const closeSession = () => {
     localStorage.removeItem('agent_shift_started_at');
@@ -47,7 +39,7 @@ export const Shift = () => {
     navigate('/login');
   };
 
-  const fmtOpened = openedAt.toLocaleString('fr-FR', {
+  const fmtOpened = openedAt.toLocaleString(locale, {
     day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
   });
 
@@ -78,28 +70,28 @@ export const Shift = () => {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-            Fin de service
+            {t('shift.title')}
           </h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            Service ouvert depuis le {fmtOpened}
+            {t('shift.openedSince', { date: fmtOpened })}
           </p>
         </div>
-        <button onClick={fetch}
+        <button onClick={fetchSummary}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
             padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600,
             background: 'transparent', color: 'var(--text-primary)',
             border: '1px solid var(--border-subtle)', cursor: 'pointer',
           }}>
-          <RefreshCw size={13} /> Actualiser
+          <RefreshCw size={13} /> {t('common.refresh')}
         </button>
       </div>
 
       {/* KPIs */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 16 }}>
-        {stat('Tickets vendus', loading ? '…' : fmt(data?.tickets), '', 'var(--accent)')}
-        {stat('Total encaissé', loading ? '…' : fmt(data?.total_wager), 'XAF', 'var(--success)')}
-        {stat('Total payé',     loading ? '…' : fmt(data?.total_payout), 'XAF', 'var(--info)')}
+        {stat(t('shift.sold'),     loading ? '…' : fmtN(data?.tickets),     '',    'var(--accent)')}
+        {stat(t('shift.cashedIn'), loading ? '…' : fmtN(data?.total_wager), 'XAF', 'var(--success)')}
+        {stat(t('shift.paidOut'),  loading ? '…' : fmtN(data?.total_payout),'XAF', 'var(--info)')}
       </div>
 
       {/* Répartition par statut */}
@@ -114,12 +106,12 @@ export const Shift = () => {
           fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
           color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 12,
         }}>
-          Répartition par statut
+          {t('shift.byStatus')}
         </div>
         {loading ? (
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>Chargement…</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>{t('common.loading')}</p>
         ) : (!data?.by_status || Object.keys(data.by_status).length === 0) ? (
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>Aucun ticket en cours.</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>{t('shift.noTickets')}</p>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
             {Object.entries(data.by_status).map(([status, count]) => (
@@ -129,7 +121,7 @@ export const Shift = () => {
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 999, display: 'flex', alignItems: 'center', gap: 8,
               }}>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{STATUS_LABEL[status] || status}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t(`status.${status}`)}</span>
                 <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>{count}</span>
               </div>
             ))}
@@ -145,10 +137,10 @@ export const Shift = () => {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <AlertTriangle size={18} style={{ color: 'var(--danger)' }} />
-          <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>Clôturer la session</h3>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>{t('shift.closeSectionTitle')}</h3>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
-          La déconnexion enregistre la fin de service. Le résumé reste consultable dans le back-office par votre responsable.
+          {t('shift.closeSectionBody')}
         </p>
         <button onClick={closeSession}
           style={{
@@ -156,7 +148,7 @@ export const Shift = () => {
             background: 'var(--danger)', color: '#fff',
             border: 'none', fontSize: 14, fontWeight: 800, cursor: 'pointer',
           }}>
-          Clôturer ma session
+          {t('shift.closeButton')}
         </button>
       </div>
     </div>

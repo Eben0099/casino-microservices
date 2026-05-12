@@ -1,27 +1,30 @@
 import React from 'react';
 import { Target, RotateCcw } from 'lucide-react';
+import { useT } from '../i18n';
 
 export const BET_MODES = [
-  { id: 'STRAIGHT', label: 'Plein',           mult: 36 },
-  { id: 'SPLIT',    label: 'Cheval',          mult: 18 },
-  { id: 'STREET',   label: 'Transversale',    mult: 12 },
-  { id: 'CORNER',   label: 'Carré',           mult: 9  },
-  { id: 'SIX_LINE', label: 'Sixain',          mult: 6  },
-  { id: 'COLUMN',   label: 'Colonne',         mult: 3  },
-  { id: 'DOZEN',    label: 'Douzaine',        mult: 3  },
-  { id: 'COLOR',    label: 'Couleur',         mult: 2  },
-  { id: 'EVEN_ODD', label: 'Pair / Impair',   mult: 2  },
-  { id: 'HALF',     label: 'High / Low',      mult: 2  },
+  { id: 'STRAIGHT',   mult: 36 },
+  { id: 'SPLIT',      mult: 18 },
+  { id: 'STREET',     mult: 12 },
+  { id: 'CORNER',     mult: 9  },
+  { id: 'SIX_LINE',   mult: 6  },
+  { id: 'SECTOR',     mult: 6  },
+  { id: 'HALF_COLOR', mult: 4  },
+  { id: 'COLUMN',     mult: 3  },
+  { id: 'DOZEN',      mult: 3  },
+  { id: 'COLOR',      mult: 2  },
+  { id: 'EVEN_ODD',   mult: 2  },
+  { id: 'HALF',       mult: 2  },
 ];
 
 /* Three groups for visual breathing room — same idea as the bet slip rows */
 const GROUPS = [
-  { title: 'Pleins & combinaisons', ids: ['STRAIGHT', 'SPLIT', 'STREET', 'CORNER', 'SIX_LINE'] },
-  { title: 'Sections',              ids: ['COLUMN', 'DOZEN'] },
-  { title: 'Paris extérieurs',      ids: ['COLOR', 'EVEN_ODD', 'HALF'] },
+  { titleKey: 'oddsTable.groups.straights', ids: ['STRAIGHT', 'SPLIT', 'STREET', 'CORNER', 'SIX_LINE'] },
+  { titleKey: 'oddsTable.groups.sections',  ids: ['SECTOR', 'HALF_COLOR', 'COLUMN', 'DOZEN'] },
+  { titleKey: 'oddsTable.groups.outside',   ids: ['COLOR', 'EVEN_ODD', 'HALF'] },
 ];
 
-const Row = ({ mode, active, onClick }) => {
+const Row = ({ mode, label, active, onClick }) => {
   const accent = 'var(--accent)';
   return (
     <button
@@ -42,7 +45,7 @@ const Row = ({ mode, active, onClick }) => {
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-tile-hover)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-tile)'; }}
     >
-      <span>{mode.label}</span>
+      <span>{label}</span>
       <span style={{
         padding: '3px 9px', borderRadius: 999,
         background: active ? 'rgba(0,0,0,0.18)' : 'var(--bg-elevated)',
@@ -57,7 +60,9 @@ const Row = ({ mode, active, onClick }) => {
 };
 
 const OddsTable = ({ value, onChange }) => {
+  const { t } = useT();
   const activeMode = BET_MODES.find(m => m.id === value);
+  const modeLabel = (id) => t(`bet.type.${id}`);
 
   return (
     <div style={{
@@ -80,13 +85,13 @@ const OddsTable = ({ value, onChange }) => {
             fontSize: 11, fontWeight: 600, letterSpacing: '0.12em',
             textTransform: 'uppercase', color: 'var(--text-muted)',
           }}>
-            Cotes & Modes
+            {t('oddsTable.title')}
           </span>
         </div>
         {value && (
           <button
             onClick={() => onChange(null)}
-            title="Réinitialiser le mode"
+            title={t('oddsTable.resetTitle')}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 4,
               padding: '3px 8px', borderRadius: 999,
@@ -96,7 +101,7 @@ const OddsTable = ({ value, onChange }) => {
               letterSpacing: '0.05em', textTransform: 'uppercase',
             }}>
             <RotateCcw size={11} />
-            Tous
+            {t('oddsTable.all')}
           </button>
         )}
       </div>
@@ -111,13 +116,13 @@ const OddsTable = ({ value, onChange }) => {
           fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
           color: 'var(--text-muted)', textTransform: 'uppercase',
         }}>
-          Mode actif
+          {t('oddsTable.activeMode')}
         </div>
         <div style={{
           fontSize: 14, fontWeight: 800, marginTop: 2,
           color: activeMode ? 'var(--accent)' : 'var(--text-primary)',
         }}>
-          {activeMode ? `${activeMode.label} · x${activeMode.mult}` : 'Tous les paris'}
+          {activeMode ? `${modeLabel(activeMode.id)} · x${activeMode.mult}` : t('oddsTable.allBets')}
         </div>
       </div>
 
@@ -128,13 +133,13 @@ const OddsTable = ({ value, onChange }) => {
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
         {GROUPS.map(group => (
-          <div key={group.title}>
+          <div key={group.titleKey}>
             <div style={{
               fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
               color: 'var(--text-muted)', textTransform: 'uppercase',
               marginBottom: 6, paddingLeft: 2,
             }}>
-              {group.title}
+              {t(group.titleKey)}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {group.ids.map(id => {
@@ -144,6 +149,7 @@ const OddsTable = ({ value, onChange }) => {
                   <Row
                     key={id}
                     mode={mode}
+                    label={modeLabel(id)}
                     active={value === id}
                     onClick={() => onChange(value === id ? null : id)}
                   />
@@ -162,7 +168,17 @@ const OddsTable = ({ value, onChange }) => {
         fontSize: 11, color: 'var(--text-muted)',
         lineHeight: 1.4,
       }}>
-        Cliquez sur une cote pour <span style={{ color: 'var(--accent)', fontWeight: 700 }}>verrouiller</span> uniquement les zones de ce type sur le tapis.
+        {(() => {
+          const hint = t('oddsTable.hint', { lock: '__LOCK__' });
+          const parts = hint.split('__LOCK__');
+          return (
+            <>
+              {parts[0]}
+              <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{t('oddsTable.hintLock')}</span>
+              {parts[1]}
+            </>
+          );
+        })()}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Sun, Moon, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useT, LanguageToggle } from '../i18n';
 
 const PIN_LENGTH = 6;
 
@@ -12,8 +13,9 @@ export const Login = () => {
   const [error, setError] = useState('');
   const { login } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { t, locale } = useT();
 
-  const dateLabel = new Date().toLocaleDateString('fr-FR', {
+  const dateLabel = new Date().toLocaleDateString(locale, {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 
@@ -22,7 +24,7 @@ export const Login = () => {
     try {
       await login(shop, currentPin);
     } catch (err) {
-      setError(err.response?.data?.detail || "Erreur d'authentification");
+      setError(err.response?.data?.detail || t('login.authError'));
       setPin('');
     } finally {
       setLoading(false);
@@ -80,18 +82,25 @@ export const Login = () => {
       display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
       gap: 0,
     }}>
-      {/* Theme toggle */}
-      <button
-        onClick={toggleTheme}
-        style={{
-          position: 'fixed', top: 16, right: 16, zIndex: 30,
-          padding: 8, borderRadius: 6,
-          background: 'var(--bg-surface)', color: 'var(--text-secondary)',
-          border: '1px solid var(--border-subtle)', cursor: 'pointer',
-        }}
-      >
-        {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-      </button>
+      {/* Top-right controls — language + theme */}
+      <div style={{
+        position: 'fixed', top: 16, right: 16, zIndex: 30,
+        display: 'flex', alignItems: 'center', gap: 8,
+      }}>
+        <LanguageToggle />
+        <button
+          onClick={toggleTheme}
+          title={t('common.themeToggle')}
+          style={{
+            padding: 8, borderRadius: 6,
+            background: 'var(--bg-surface)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border-subtle)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+      </div>
 
       {/* LEFT — Brand panel */}
       <div style={{
@@ -108,10 +117,10 @@ export const Login = () => {
           }}>AG</div>
           <div>
             <p style={{ fontSize: 14, fontWeight: 800, letterSpacing: '0.18em', color: 'var(--text-primary)', fontFamily: 'Outfit' }}>
-              AGDTECH CASHER
+              {t('login.brandTitle')}
             </p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              Plateforme de jeux & loterie
+              {t('login.brandSubtitle')}
             </p>
           </div>
         </div>
@@ -121,16 +130,15 @@ export const Login = () => {
             fontSize: 36, fontWeight: 800, lineHeight: 1.2, color: 'var(--text-primary)',
             marginBottom: 12,
           }}>
-            Point de vente <span style={{ color: 'var(--accent)' }}>multi-jeux</span>
+            {t('login.heroTitle')} <span style={{ color: 'var(--accent)' }}>{t('login.heroAccent')}</span>
           </h1>
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', maxWidth: 420 }}>
-            Roulette · Keno · Crash · Loto — pariez, vérifiez, encaissez.
-            Solde caisse, paiements et fin de service en un seul écran.
+            {t('login.heroBody')}
           </p>
         </div>
 
         <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          AGDTech © 2026 — Cameroun · {dateLabel}
+          {t('login.footer')} · {dateLabel}
         </p>
       </div>
 
@@ -139,10 +147,10 @@ export const Login = () => {
         <div className="animate-fade" style={{ width: '100%', maxWidth: 400 }}>
           <div style={{ marginBottom: 24 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-              Connexion caissière
+              {t('login.formTitle')}
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              Entrez votre code boutique puis votre PIN à 6 chiffres.
+              {t('login.formSubtitle')}
             </p>
           </div>
 
@@ -153,13 +161,13 @@ export const Login = () => {
               fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
               textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6,
             }}>
-              Code boutique / téléphone
+              {t('login.shopLabel')}
             </label>
             <input
               type="text"
               autoFocus
               autoComplete="username"
-              placeholder="MA-BOUTIQUE ou +237 6XX..."
+              placeholder={t('login.shopPlaceholder')}
               value={shop}
               onChange={(e) => { setShop(e.target.value); setError(''); }}
               style={{
@@ -180,7 +188,7 @@ export const Login = () => {
                 fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
                 textTransform: 'uppercase', letterSpacing: '0.1em',
               }}>
-                Code PIN
+                {t('login.pinLabel')}
               </label>
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 {pin.length}/{PIN_LENGTH}
@@ -229,7 +237,7 @@ export const Login = () => {
           </div>
 
           <p style={{ textAlign: 'center', marginTop: 18, fontSize: 11, color: 'var(--text-muted)' }}>
-            AGDTech © 2026 — Cameroun
+            {t('login.footer')}
           </p>
         </div>
       </div>

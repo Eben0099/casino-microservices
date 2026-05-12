@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { I18nProvider } from './i18n';
 import Layout from './components/Layout';
 import { Login } from './pages/Login';
 import { Jeux } from './pages/Jeux';
@@ -23,26 +24,28 @@ const PublicRoute = ({ children }) => {
 
 function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <Router basename="/agents/pos">
-          <Routes>
-            <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+    <I18nProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <Router basename="/agents/pos">
+            <Routes>
+              <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
 
-            <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
-              <Route path="/jeux"   element={<Jeux />} />
-              <Route path="/ventes" element={<Ventes />} />
-              <Route path="/verify" element={<Verify />} />
-              <Route path="/shift"  element={<Shift />} />
-            </Route>
+              <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
+                <Route path="/jeux"   element={<Jeux />} />
+                <Route path="/ventes" element={<Ventes />} />
+                <Route path="/verify" element={<Verify />} />
+                <Route path="/shift"  element={<Shift />} />
+              </Route>
 
-            <Route path="/" element={<Navigate to="/jeux" replace />} />
-            <Route path="/dashboard" element={<Navigate to="/jeux" replace />} />
-            <Route path="*" element={<Navigate to="/jeux" replace />} />
-          </Routes>
-        </Router>
-      </AuthProvider>
-    </ThemeProvider>
+              <Route path="/" element={<Navigate to="/jeux" replace />} />
+              <Route path="/dashboard" element={<Navigate to="/jeux" replace />} />
+              <Route path="*" element={<Navigate to="/jeux" replace />} />
+            </Routes>
+          </Router>
+        </AuthProvider>
+      </ThemeProvider>
+    </I18nProvider>
   );
 }
 

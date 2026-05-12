@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, Loader2, AlertCircle } from 'lucide-react';
 import { ticketApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { useT } from '../i18n';
 import TicketReceipt from './TicketReceipt';
 
 /**
@@ -16,6 +17,7 @@ const TicketVerifier = ({ variant = 'inline' }) => {
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [error, setError] = useState('');
   const { fetchBalance, user } = useAuth();
+  const { t } = useT();
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -25,7 +27,7 @@ const TicketVerifier = ({ variant = 'inline' }) => {
       const res = await ticketApi.getDetails(code.trim().toUpperCase());
       setTicket(res.data);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Ticket introuvable.');
+      setError(err.response?.data?.detail || t('verify.notFound'));
     } finally {
       setLoading(false);
     }
@@ -40,7 +42,7 @@ const TicketVerifier = ({ variant = 'inline' }) => {
       setTicket(res.data);
       await fetchBalance(user.id);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Erreur lors du paiement');
+      setError(err.response?.data?.detail || t('verify.payoutError'));
     } finally {
       setPayoutLoading(false);
     }
@@ -58,9 +60,9 @@ const TicketVerifier = ({ variant = 'inline' }) => {
       }}>
         {!isInline && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>Vérifier un ticket</h1>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{t('verify.title')}</h1>
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              Scanner prêt — code-barres ou QR
+              {t('verify.scannerReadyShort')}
             </p>
           </div>
         )}
@@ -72,10 +74,10 @@ const TicketVerifier = ({ variant = 'inline' }) => {
             color: 'var(--text-muted)', textTransform: 'uppercase',
           }}>
             <Search size={13} style={{ color: 'var(--accent)' }} />
-            Vérifier un ticket
+            {t('verify.title')}
             <span style={{ flex: 1 }} />
             <span style={{ letterSpacing: 0, textTransform: 'none', color: 'var(--text-muted)', fontWeight: 500, fontSize: 11 }}>
-              Scanner ou saisir
+              {t('verify.scannerOrType')}
             </span>
           </div>
         )}
@@ -88,7 +90,7 @@ const TicketVerifier = ({ variant = 'inline' }) => {
             }} />
             <input
               type="text"
-              placeholder="TK-2026…"
+              placeholder={t('verify.placeholder')}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               style={{
@@ -111,13 +113,13 @@ const TicketVerifier = ({ variant = 'inline' }) => {
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               whiteSpace: 'nowrap',
             }}>
-            {loading ? <Loader2 size={14} className="animate-spin" /> : 'Vérifier'}
+            {loading ? <Loader2 size={14} className="animate-spin" /> : t('verify.button')}
           </button>
         </form>
 
         {!isInline && (
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
-            Le PIN ne sera demandé qu'au moment du décaissement.
+            {t('verify.pinHint')}
           </p>
         )}
 
