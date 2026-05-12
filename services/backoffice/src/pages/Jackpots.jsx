@@ -430,7 +430,7 @@ function Jackpots() {
                   {form.scope !== 'GLOBAL' && (
                     <FormSelect label="Niveau" value={form.tier} disabled={!!editingId}
                       onChange={v => setForm(f => ({ ...f, tier: v }))}>
-                      <option value="">— Choisir —</option>
+                      <option value="">{form.scope === 'GAME' ? '— Jackpot global du jeu —' : '— Choisir —'}</option>
                       {TIERS.map(t => <option key={t} value={t}>{TIER_META[t].label}</option>)}
                     </FormSelect>
                   )}

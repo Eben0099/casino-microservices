@@ -46,7 +46,9 @@ const PotCard = ({ pot }) => {
   const headline = pot.scope === 'GLOBAL'
     ? t('jackpots.scope.GLOBAL')
     : (pot.scope === 'GAME'
-        ? `${pot.game_id || ''} · ${t(`jackpots.tier.${pot.tier}`)}`
+        ? (pot.tier
+            ? `${pot.game_id || ''} · ${t(`jackpots.tier.${pot.tier}`)}`
+            : `${pot.game_id || ''} · ${t('jackpots.scope.GAME')}`)
         : `${t('jackpots.scope.LOCAL')} · ${t(`jackpots.tier.${pot.tier}`)}`);
 
   return (
@@ -129,12 +131,13 @@ const JackpotsBar = ({ pots }) => {
   const { t } = useT();
   if (!pots || pots.length === 0) return null;
 
-  const TIER_ORDER = { GOLD: 0, SILVER: 1, BRONZE: 2 };
+  // Tier no-tier (= "le" jackpot du scope) en tete, puis Or > Argent > Bronze.
+  const TIER_ORDER = { GOLD: 1, SILVER: 2, BRONZE: 3 };
   const SCOPE_ORDER = { GLOBAL: 0, GAME: 1, LOCAL: 2 };
   const sorted = [...pots].sort((a, b) => {
     const s = SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope];
     if (s !== 0) return s;
-    return (TIER_ORDER[a.tier] ?? 99) - (TIER_ORDER[b.tier] ?? 99);
+    return (a.tier ? TIER_ORDER[a.tier] : 0) - (b.tier ? TIER_ORDER[b.tier] : 0);
   });
 
   return (

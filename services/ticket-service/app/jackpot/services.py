@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 import httpx
 from fastapi import HTTPException
 from sqlalchemy import select, update, delete, func, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models as ticket_models
@@ -72,8 +73,10 @@ def _validate_pot_identity(scope: JackpotScope, game_id, kiosk_id, tier) -> None
         if game_id or kiosk_id or tier:
             raise HTTPException(status_code=400, detail="Le pot GLOBAL ne doit avoir ni game_id, ni kiosk_id, ni tier")
     elif scope == JackpotScope.GAME:
-        if not game_id or kiosk_id or not tier:
-            raise HTTPException(status_code=400, detail="Le pot GAME doit avoir game_id + tier, sans kiosk_id")
+        # tier est optionnel : un pot GAME sans tier = "le" jackpot global du jeu,
+        # complementaire des paliers Bronze/Argent/Or.
+        if not game_id or kiosk_id:
+            raise HTTPException(status_code=400, detail="Le pot GAME doit avoir game_id (tier optionnel), sans kiosk_id")
     elif scope == JackpotScope.LOCAL:
         if not game_id or not kiosk_id or not tier:
             raise HTTPException(status_code=400, detail="Le pot LOCAL doit avoir game_id + kiosk_id + tier")
@@ -106,7 +109,14 @@ async def create_pot(db: AsyncSession, payload) -> JackpotPot:
         cycle_number=1,
     )
     db.add(pot)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Un pot avec cette identite (scope/jeu/kiosque/niveau) existe deja.",
+        ) from e
     await db.refresh(pot)
     logger.info(f"JACKPOT_POT_CREATED id={pot.id} scope={pot.scope.value} game={pot.game_id} tier={pot.tier} threshold_secret=set")
     return pot

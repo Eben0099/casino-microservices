@@ -15,8 +15,9 @@ Trois familles de jackpots tournent en parallèle :
 | Famille | Périmètre | Nombre d'instances | Paliers |
 |---|---|---|---|
 | **Jackpot Général** | Tous les tickets de tous les jeux de tous les kiosques | 1 (réseau entier) | 1 seul niveau |
-| **Jackpot Jeu** | Tous les tickets d'un jeu, tous kiosques | 1 par jeu | Bronze / Argent / Or |
-| **Jackpot Local** | Tickets d'un jeu sur un kiosque donné | 1 par couple (jeu × kiosque) | Bronze / Argent / Or |
+| **Jackpot Jeu (principal)** | Tous les tickets d'un jeu, tous kiosques | 1 par jeu | 1 seul niveau (sans tier) |
+| **Jackpot Jeu (paliers)** | Tous les tickets d'un jeu, tous kiosques | 3 par jeu | Bronze / Argent / Or |
+| **Jackpot Local** | Tickets d'un jeu sur un kiosque donné | 3 par couple (jeu × kiosque) | Bronze / Argent / Or |
 
 > **Différence entre Bronze / Argent / Or** : uniquement l'intervalle du seuil. Bronze tombe souvent pour de petites cagnottes, Or tombe rarement pour des cagnottes plus grosses. La mécanique est identique aux 3 paliers.
 
