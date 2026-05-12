@@ -12,12 +12,13 @@ Multi-game casino platform (European roulette in production, more games coming) 
 4. [Authentication](#authentication)
 5. [REST API — endpoints per service](#rest-api--endpoints-per-service)
 6. [Roulette WebSocket protocol (Unity)](#roulette-websocket-protocol-unity)
-7. [Bet types (roulette)](#bet-types-roulette)
-8. [Round lifecycle](#round-lifecycle)
-9. [Environment variables](#environment-variables)
-10. [Provably fair](#provably-fair)
-11. [Databases](#databases)
-12. [Troubleshooting](#troubleshooting)
+7. [Jackpots integration (Unity)](#jackpots-integration-unity)
+8. [Bet types (roulette)](#bet-types-roulette)
+9. [Round lifecycle](#round-lifecycle)
+10. [Environment variables](#environment-variables)
+11. [Provably fair](#provably-fair)
+12. [Databases](#databases)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -331,6 +332,130 @@ Server replies:
 
 ### Reconnect
 On disconnect, **reconnect with exponential backoff** (1s -> 2s -> 4s -> 8s -> 30s max). The next `welcome` resyncs the state.
+
+---
+
+## Jackpots integration (Unity)
+
+Each kiosk has a short 4-character public code (`kiosk_code`) — printed on the physical machine and stored once in the Unity client config (e.g. `AGDTech.config: kiosk_code = "7H3X"`). All jackpot data is fetched with that single key, via **two public REST endpoints**. No authentication is required: these endpoints expose only public-safe data (no PINs, no balances, no JWTs).
+
+### Endpoint 1 — Bootstrap : resolve the kiosk
+
+```
+GET /api/agents/by-code/{kiosk_code}
+```
+
+Use this once when Unity starts, to validate the configured code and obtain the kiosk metadata.
+
+**Example:**
+```
+GET http://localhost/api/agents/by-code/7H3X
+```
+```json
+{
+  "agent_id": "27831149-f8ba-4bd4-9558-94747a0d4d86",
+  "kiosk_code": "7H3X",
+  "kiosk_name": "Kiosque Akwa",
+  "kiosk_location": "Douala — Akwa, Bd de la Liberté",
+  "is_active": true,
+  "is_suspended": false
+}
+```
+
+Errors :
+- `404 { "detail": "Aucun kiosque trouve pour ce code" }` — bad code, ask the operator to re-enter / re-scan it
+- `400 { "detail": "Code kiosque vide" }` — empty input
+
+### Endpoint 2 — Live jackpots feed (poll)
+
+```
+GET /api/tickets/jackpots/by-kiosk/{kiosk_code}
+```
+
+Returns **every jackpot pot fed by tickets sold on this kiosk** :
+- the unique **GLOBAL** pot (network-wide)
+- the **GAME** pots for the games played here — the main no-tier pot + Bronze / Silver / Gold tiers
+- the **LOCAL** pots tied to this specific kiosk — Bronze / Silver / Gold
+
+The secret threshold of each pot is **never** exposed.
+
+**Example:**
+```
+GET http://localhost/api/tickets/jackpots/by-kiosk/7H3X
+```
+```json
+{
+  "kiosk_code": "7H3X",
+  "kiosk_name": "Kiosque Akwa",
+  "kiosk_id": "27831149-f8ba-4bd4-9558-94747a0d4d86",
+  "pots": [
+    { "id": "uuid", "scope": "GLOBAL", "game_id": null,            "tier": null,     "current_amount": 1250000 },
+    { "id": "uuid", "scope": "GAME",   "game_id": "ROULETTE-TBL1", "tier": null,     "current_amount":  340000 },
+    { "id": "uuid", "scope": "GAME",   "game_id": "ROULETTE-TBL1", "tier": "BRONZE", "current_amount":   42000 },
+    { "id": "uuid", "scope": "GAME",   "game_id": "ROULETTE-TBL1", "tier": "SILVER", "current_amount":  280000 },
+    { "id": "uuid", "scope": "GAME",   "game_id": "ROULETTE-TBL1", "tier": "GOLD",   "current_amount": 4900000 },
+    { "id": "uuid", "scope": "LOCAL",  "game_id": "ROULETTE-TBL1", "tier": "BRONZE", "current_amount":    8500 },
+    { "id": "uuid", "scope": "LOCAL",  "game_id": "ROULETTE-TBL1", "tier": "SILVER", "current_amount":   45000 },
+    { "id": "uuid", "scope": "LOCAL",  "game_id": "ROULETTE-TBL1", "tier": "GOLD",   "current_amount":  610000 }
+  ]
+}
+```
+
+### Polling strategy
+
+Jackpots evolve at the rhythm of ticket sales — **a 5-second poll is plenty**. There is no WebSocket for jackpots in v1 (planned for v2). Recommended Unity loop:
+
+```csharp
+// Pseudocode — every 5 seconds
+var resp = await http.GetAsync($"/api/tickets/jackpots/by-kiosk/{kioskCode}");
+var data = JsonConvert.DeserializeObject<JackpotsResponse>(resp);
+foreach (var pot in data.pots)
+{
+    // Build display key: scope + tier + game_id
+    // GLOBAL                -> "GLOBAL"
+    // GAME (no tier)        -> "GAME:<game_id>"
+    // GAME with tier        -> "GAME:<game_id>:<tier>"
+    // LOCAL with tier       -> "LOCAL:<game_id>:<tier>"
+    UpdateMeter(pot);
+}
+```
+
+### How to render each pot
+
+| `scope` | `tier`  | Suggested label                            | Highlight |
+|---------|---------|--------------------------------------------|-----------|
+| GLOBAL  | null    | **GRAND JACKPOT**                          | brightest, on-stage |
+| GAME    | null    | **`{game_id}` JACKPOT**                    | medium gold |
+| GAME    | BRONZE  | `{game_id}` BRONZE                         | bronze |
+| GAME    | SILVER  | `{game_id}` SILVER                         | silver |
+| GAME    | GOLD    | `{game_id}` GOLD                           | bright gold + pulse |
+| LOCAL   | BRONZE  | LOCAL BRONZE                               | dim bronze |
+| LOCAL   | SILVER  | LOCAL SILVER                               | dim silver |
+| LOCAL   | GOLD    | LOCAL GOLD                                 | dim gold |
+
+### Detecting a HIT on this kiosk
+
+When a ticket vendor sells a ticket and a jackpot is triggered, the **prize is attached to the ticket itself** (status `WON`, `total_payout` bumped). The Unity screen has two complementary signals :
+
+1. **Pot reset** — the matching `current_amount` drops sharply on the next poll. Animate a celebration when you observe `current_amount` go down by more than (say) 20%.
+2. **Audit endpoint** (`GET /api/tickets/admin/jackpots/wins`) — protected by `ADMIN_API_KEY`. Not recommended for Unity unless you have a secure channel. The pot-drop heuristic above is sufficient for visual feedback.
+
+### CORS
+
+These two endpoints accept any `Origin` (no JWT, no cookie required). They can be called directly from Unity's `UnityWebRequest` without preflight workarounds.
+
+### Sample full flow (Unity startup)
+
+```
+1.  Load kiosk_code from local config (e.g. "7H3X")
+2.  GET /api/agents/by-code/7H3X
+        if 404 -> show "Kiosk not configured" + manual code entry
+        if is_active=false or is_suspended=true -> show "Kiosk disabled" overlay
+        else -> store agent_id, kiosk_name in memory
+3.  GET /api/tickets/jackpots/by-kiosk/7H3X     (initial fetch)
+4.  loop every 5s: refetch and update on-screen meters
+5.  also keep the existing WebSocket ws://.../ws/roulette open for game state
+```
 
 ---
 
