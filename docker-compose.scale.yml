@@ -1,0 +1,50 @@
+# Production-like overlay for local stress testing.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d \
+#       --scale ticket-service=4 --scale agent-service=4
+#
+# Why ONE uvicorn worker per container (not --workers N):
+#   The Redis pubsub listener (settlement / replay generation) is initialised
+#   in @app.on_event("startup") — meaning each uvicorn worker process spawns
+#   its own listener. With N workers × M replicas, every ROUND_FINISHED event
+#   is processed N×M times in parallel, causing massive lock contention on
+#   the tickets table. So we run 1 worker per container and rely on replica
+#   count for parallelism. To scale further on a single host, raise --scale,
+#   not --workers.
+#
+# Capacity envelope (per replica):
+#   1 worker × 20 pool conns × 4 ticket-svc replicas = 80 conns
+#   1 worker × 10 pool conns × 4 agent-svc  replicas = 40 conns
+#   game-roulette + admin overhead                   = ~20
+#   ------------------------------------------------ = ~140 < max_connections=300
+
+services:
+  agent-service:
+    command: >
+      sh -c "sleep 10 && alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://casino_admin:super_secret_password@postgres:5432/casino_agent_db
+      - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
+      - ADMIN_API_KEY=CleSuperSecreteBackoffice2026
+      - ROOT_PATH=/api/agents
+      - DB_POOL_SIZE=10
+      - DB_POOL_MAX_OVERFLOW=10
+      - SQL_ECHO=false
+
+  ticket-service:
+    command: >
+      sh -c "sleep 10 && alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://casino_admin:super_secret_password@postgres:5432/casino_ticket_db
+      - REDIS_URL=redis://casino_redis:6379/0
+      - AGENT_SERVICE_URL=http://agent-service:8000
+      - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
+      - ADMIN_API_KEY=CleSuperSecreteBackoffice2026
+      - ROOT_PATH=/api/tickets
+      - DB_POOL_SIZE=20
+      - DB_POOL_MAX_OVERFLOW=10
+      - SQL_ECHO=false
+      - SETTLEMENT_BATCH_SIZE=500

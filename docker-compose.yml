@@ -74,7 +74,8 @@ services:
   agent-service:
     build:
       context: ./services/agent-service
-    container_name: casino_agent_api
+    # container_name omitted so the service can scale via `docker compose --scale`.
+    # Docker still exposes it under DNS name `agent-service` (round-robin to replicas).
     command: sh -c "sleep 10 && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     depends_on:
       - postgres
@@ -99,7 +100,8 @@ services:
   ticket-service:
     build:
       context: ./services/ticket-service
-    container_name: casino_ticket_api
+    # container_name omitted so the service can scale via `docker compose --scale`.
+    # Docker still exposes it under DNS name `ticket-service` (round-robin to replicas).
     command: sh -c "sleep 10 && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     depends_on:
       - postgres

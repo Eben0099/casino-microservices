@@ -105,8 +105,14 @@ def read_state(container: str = REDIS_CONTAINER) -> Optional[dict]:
         return None
 
 
-async def wait_for_betting(container: str, timeout_s: int = 90) -> dict:
-    """Block until phase == Betting. Returns the full state dict."""
+async def wait_for_betting(container: str, timeout_s: int = 90, min_window_s: float = 15.0) -> dict:
+    """Block until phase == Betting AND at least `min_window_s` seconds remain.
+
+    Without the min window guard, the simulator often catches Betting at second
+    28 of 30, fires its tickets, and most of them get rejected by the round
+    rotation. Waiting for a fresh Betting phase gives a comparable measurement
+    every time.
+    """
     deadline = time.monotonic() + timeout_s
     last = None
     while time.monotonic() < deadline:
@@ -117,7 +123,13 @@ async def wait_for_betting(container: str, timeout_s: int = 90) -> dict:
                 print(f"  [phase] {phase}")
                 last = phase
             if phase == "Betting":
-                return st
+                remaining = betting_seconds_remaining(st)
+                if remaining >= min_window_s:
+                    return st
+                # Too close to the closing edge — wait for the next round
+                await asyncio.sleep(remaining + 0.5)
+                last = None
+                continue
         await asyncio.sleep(0.4)
     raise RuntimeError("Timed out waiting for Betting phase")
 
@@ -278,10 +290,6 @@ async def simulate_round(
     state = await wait_for_betting(REDIS_CONTAINER)
     round_id = state["round_id"]
     betting_remaining = betting_seconds_remaining(state)
-    if betting_remaining < 2:
-        print(f"  [skip] Betting almost over ({betting_remaining:.1f}s) — waiting next round")
-        await asyncio.sleep(betting_remaining + 1)
-        return await simulate_round(client, pool, kiosks_min, kiosks_max, tickets_min, tickets_max, output_dir)
 
     k = random.randint(kiosks_min, min(kiosks_max, len(pool)))
     chosen = random.sample(pool, k)

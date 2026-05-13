@@ -56,27 +56,29 @@ http:
           - "/api/roulette"
 
   services:
+    # URLs reference docker-compose service names (not container names) so
+    # Docker's internal DNS load-balances across all replicas when scaled.
     agent-service:
       loadBalancer:
         servers:
-          - url: "http://casino_agent_api:8000"
+          - url: "http://agent-service:8000"
 
     ticket-service:
       loadBalancer:
         servers:
-          - url: "http://casino_ticket_api:8000"
+          - url: "http://ticket-service:8000"
 
     roulette-service:
       loadBalancer:
         servers:
-          - url: "http://casino_roulette_engine:8000"
+          - url: "http://game-roulette-service:8000"
 
     agent-web-service:
       loadBalancer:
         servers:
-          - url: "http://casino_agent_web:5173"
+          - url: "http://agent-web:5173"
 
     backoffice-service:
       loadBalancer:
         servers:
-          - url: "http://casino_backoffice:5173"
+          - url: "http://backoffice-web:5173"

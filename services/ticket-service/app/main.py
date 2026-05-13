@@ -45,6 +45,10 @@ async def health_check():
     return {"status": "ok", "service": "ticket-service", "timestamp": str(datetime.now())}
 
 redis_client = None
+# Module-level httpx client with connection pooling + keep-alive.
+# Initialised at startup, closed at shutdown. Avoids one TCP handshake +
+# DNS lookup per ticket sale (which becomes a real bottleneck at >50/s).
+http_client: httpx.AsyncClient | None = None
 
 ADMIN_EVENTS_CHANNEL = "admin-events"
 
@@ -64,15 +68,21 @@ async def publish_admin_event(event_type: str, payload: dict):
 
 @app.on_event("startup")
 async def startup_event():
-    global redis_client
+    global redis_client, http_client
     redis_url = os.getenv("REDIS_URL", "redis://casino_redis:6379/0")
     redis_client = redis.from_url(redis_url, decode_responses=True)
-    
+
+    # Pooled HTTP client (50 keep-alive conns, 100 max). Sized for ~500 t/s.
+    limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=30.0)
+    http_client = httpx.AsyncClient(timeout=10.0, limits=limits)
+
     # ON LANCE NOTRE ECOUTEUR EN ARRIÈRE-PLAN
     asyncio.create_task(listen_to_roulette_results())
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    if http_client:
+        await http_client.aclose()
     if redis_client:
         await redis_client.close()
 
@@ -125,12 +135,18 @@ async def process_settlement(round_id: str, winning_number: str):
 
     while True:
         async with AsyncSessionLocal() as db:
+            # Critical: filter on winning_number IS NULL to identify unsettled
+            # tickets. Without it, the batch loop would re-process tickets we
+            # already marked WON (their status stays WON across iterations)
+            # and double-count their payouts. Once settled, winning_number is
+            # populated so they drop out of subsequent chunks.
             result = await db.execute(
                 select(Ticket)
                 .options(selectinload(Ticket.bets))
                 .where(
                     Ticket.round_id == round_id,
                     Ticket.status.in_([TicketStatus.PENDING, TicketStatus.WON]),
+                    Ticket.winning_number.is_(None),
                 )
                 .order_by(Ticket.created_at)
                 .limit(SETTLEMENT_BATCH_SIZE)
@@ -341,25 +357,24 @@ async def create_ticket(
         else f"Vente Ticket {short_code} (+ replay {replay_rounds - 1} rounds)"
     )
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                agent_url,
-                json={
-                    "amount": debit_amount,
-                    "tx_type": "BET_RECEIVED",
-                    "description": debit_description,
-                    "reference": short_code
-                },
-                headers={"X-API-Key": admin_key},
-                timeout=5.0
-            )
-            response.raise_for_status()
-        except httpx.HTTPError:
-            raise HTTPException(
-                status_code=503,
-                detail="Le service de caisse est indisponible ou n'a pas pu traiter la mise."
-            )
+    try:
+        response = await http_client.post(
+            agent_url,
+            json={
+                "amount": debit_amount,
+                "tx_type": "BET_RECEIVED",
+                "description": debit_description,
+                "reference": short_code,
+            },
+            headers={"X-API-Key": admin_key},
+            timeout=5.0,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=503,
+            detail="Le service de caisse est indisponible ou n'a pas pu traiter la mise.",
+        )
 
     # Si replay demande, on cree le plan associe (rounds_remaining = replay_rounds - 1)
     if replay_rounds > 1:
@@ -575,24 +590,23 @@ async def cancel_ticket(
     agent_url = f"{agent_base}/{ticket.agent_id}/provision"
     admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                agent_url,
-                json={
-                    "amount": -ticket.total_wager,
-                    "tx_type": "REVERSAL",
-                    "description": f"Annulation Ticket {short_code}",
-                    "reference": short_code,
-                },
-                headers={"X-API-Key": admin_key},
-                timeout=5.0,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as e:
-            await db.rollback()
-            logger.error(f"TICKET_CANCEL_REVERSAL_FAIL code={short_code} error={e}")
-            raise HTTPException(status_code=503, detail="Erreur lors du remboursement de la caisse.")
+    try:
+        response = await http_client.post(
+            agent_url,
+            json={
+                "amount": -ticket.total_wager,
+                "tx_type": "REVERSAL",
+                "description": f"Annulation Ticket {short_code}",
+                "reference": short_code,
+            },
+            headers={"X-API-Key": admin_key},
+            timeout=5.0,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        await db.rollback()
+        logger.error(f"TICKET_CANCEL_REVERSAL_FAIL code={short_code} error={e}")
+        raise HTTPException(status_code=503, detail="Erreur lors du remboursement de la caisse.")
 
     # 3. Statut final
     ticket.status = TicketStatus.CANCELLED
@@ -641,22 +655,21 @@ async def payout_ticket(
     agent_url = f"{agent_base}/{ticket.agent_id}/provision"
     admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                agent_url,
-                json={
-                    "amount": -ticket.total_payout,
-                    "tx_type": "PAYOUT",
-                    "description": f"Paiement Gain Ticket {short_code}",
-                    "reference": short_code
-                },
-                headers={"X-API-Key": admin_key},
-                timeout=5.0
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as e:
-            raise HTTPException(status_code=503, detail="Erreur de communication avec le service de caisse.")
+    try:
+        response = await http_client.post(
+            agent_url,
+            json={
+                "amount": -ticket.total_payout,
+                "tx_type": "PAYOUT",
+                "description": f"Paiement Gain Ticket {short_code}",
+                "reference": short_code,
+            },
+            headers={"X-API-Key": admin_key},
+            timeout=5.0,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail="Erreur de communication avec le service de caisse.")
 
     # 4. Mettre à jour le statut
     ticket.status = TicketStatus.PAID
