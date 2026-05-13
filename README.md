@@ -12,7 +12,8 @@ Multi-game casino platform (European roulette in production, more games coming) 
 4. [Authentication](#authentication)
 5. [REST API — endpoints per service](#rest-api--endpoints-per-service)
 6. [Roulette WebSocket protocol (Unity)](#roulette-websocket-protocol-unity)
-7. [Jackpots integration (Unity)](#jackpots-integration-unity)
+7. [Admin real-time events (backoffice)](#admin-real-time-events-backoffice)
+8. [Jackpots integration (Unity)](#jackpots-integration-unity)
 8. [Bet types (roulette)](#bet-types-roulette)
 9. [Round lifecycle](#round-lifecycle)
 10. [Environment variables](#environment-variables)
@@ -332,6 +333,139 @@ Server replies:
 
 ### Reconnect
 On disconnect, **reconnect with exponential backoff** (1s -> 2s -> 4s -> 8s -> 30s max). The next `welcome` resyncs the state.
+
+---
+
+## Admin real-time events (backoffice)
+
+The **same WebSocket endpoint `/ws/roulette`** also relays administrative events
+emitted by `ticket-service` (sales, payouts, settlements, jackpot moves).
+That's why the back-office Dashboard, Jackpots, Transactions and Agents pages
+update **live** without polling.
+
+### Pipeline
+
+```
+ticket-service ──publish──► Redis channel "admin-events"
+                                 │
+                  game-roulette-service subscribes ──┐
+                                                    ▼
+                              manager.broadcast(msg) on /ws/roulette
+                                                    │
+                                                    ▼
+                                     React useAdminWs() hook
+                                                    │
+                                          debounced re-fetch
+```
+
+Unity clients can simply **ignore** unknown `type` values — these messages
+co-exist with the roulette events (`phase_changed`, `result_revealed`, etc.).
+
+### Event types
+
+All messages are JSON with `"ts": <float>` (UNIX seconds) plus a `"type"`
+discriminator.
+
+#### `ticket_created`
+Fired immediately after `POST /api/tickets/` commits a new betslip.
+```json
+{
+  "type": "ticket_created",
+  "ts": 1714986317.482,
+  "short_code": "TK-20260513-V5EZZY",
+  "agent_id": "d6e8ddb9-c1c8-46c9-be85-90fe166a0287",
+  "round_id": "ROUND-1714986300",
+  "total_wager": 500,
+  "bets_count": 3,
+  "replay_rounds": 1
+}
+```
+
+#### `ticket_paid`
+Fired after `POST /api/tickets/{short_code}/payout` cashes out a winner.
+```json
+{
+  "type": "ticket_paid",
+  "ts": 1714986402.115,
+  "short_code": "TK-20260513-V5EZZY",
+  "agent_id": "d6e8ddb9-c1c8-46c9-be85-90fe166a0287",
+  "payout": 1500
+}
+```
+
+#### `round_settled`
+Aggregate fired **once per round** at the end of the settlement loop.
+```json
+{
+  "type": "round_settled",
+  "ts": 1714986375.0,
+  "round_id": "ROUND-1714986300",
+  "winning_number": "17",
+  "processed": 54,
+  "won": 35,
+  "lost": 19,
+  "total_payout": 92300
+}
+```
+
+#### `jackpot_progress`
+Fired after every sale that contributed to one or more pots. The `pots` array
+contains a snapshot of every pot that received money on this ticket.
+```json
+{
+  "type": "jackpot_progress",
+  "ts": 1714986317.482,
+  "pots": [
+    { "pot_id": "…", "scope": "GLOBAL", "tier": null, "game_id": null, "current_amount": 256988, "cycle_number": 1 },
+    { "pot_id": "…", "scope": "GAME",   "tier": "BRONZE", "game_id": "roulette", "current_amount": 1055, "cycle_number": 1 },
+    { "pot_id": "…", "scope": "LOCAL",  "tier": "GOLD",   "game_id": "roulette", "current_amount": 2640, "cycle_number": 4 }
+  ]
+}
+```
+> High frequency under load (~6 pots × every ticket). Clients are expected to
+> debounce or coalesce updates. The backoffice uses a 2-second debounce.
+
+#### `jackpot_hit`
+Fired when a contribution crosses the (secret) threshold of a pot. The hit is
+processed in the same DB transaction as the ticket sale, so the message is
+**guaranteed** to arrive after the corresponding `ticket_created`.
+```json
+{
+  "type": "jackpot_hit",
+  "ts": 1714986317.482,
+  "pot_id": "…",
+  "scope": "LOCAL",
+  "tier": "GOLD",
+  "trigger_ticket": "TK-20260513-V5EZZY",
+  "winner_ticket_id": "…",
+  "winner_agent_id": "…",
+  "payout": 1240000
+}
+```
+
+### Reliability
+
+- **At-most-once delivery** : Redis pub/sub does not persist. If the relay or
+  the WS server is down at publish time, the message is lost. The back-office
+  treats events as **invalidation hints**, not as the source of truth — it
+  always re-fetches the affected REST endpoint after each event. A polling
+  fallback (3 s) takes over automatically when the WS is offline.
+- **Ordering** : all events for a given ticket are published from the same
+  task in sequence, so order is preserved end-to-end.
+- **Multi-instance ticket-service** : all replicas publish to the same Redis
+  channel, the single roulette WS server fans out to every connected admin.
+
+### Consuming the stream (Node example)
+
+```js
+const ws = new WebSocket('ws://localhost/ws/roulette');
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === 'jackpot_hit') {
+    console.log(`Jackpot ${msg.scope}/${msg.tier} hit for ${msg.payout} XAF`);
+  }
+};
+```
 
 ---
 

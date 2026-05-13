@@ -213,12 +213,19 @@ def _compute_contribution(pot: JackpotPot, total_wager: int) -> int:
 # Contribution (appele apres creation d'un ticket)
 # ----------------------------------------------------------------------
 
-async def contribute_for_ticket(db: AsyncSession, ticket: ticket_models.Ticket) -> List["HitResult"]:
-    """Alimente tous les pots eligibles. Retourne la liste des HITs declenches.
+async def contribute_for_ticket(db: AsyncSession, ticket: ticket_models.Ticket) -> tuple[List["HitResult"], List[dict]]:
+    """Alimente tous les pots eligibles.
+
+    Retourne (hits, touched_pots) :
+      - hits        : liste des HITs declenches sur ce ticket
+      - touched_pots: snapshots {pot_id, current_amount, cycle_number} des pots
+                      qui ont recu une contribution (utile pour publier un
+                      event WS jackpot_progress vers le dashboard admin)
 
     Transaction atomique : si une etape echoue, l'appelant rollback.
     """
     hits: List[HitResult] = []
+    touched: List[dict] = []
 
     # Lock les pots eligibles pour eviter les races
     result = await db.execute(
@@ -257,7 +264,16 @@ async def contribute_for_ticket(db: AsyncSession, ticket: ticket_models.Ticket) 
             hit = await _process_hit(db, pot, ticket)
             hits.append(hit)
 
-    return hits
+        touched.append({
+            "pot_id": str(pot.id),
+            "scope": pot.scope.value if hasattr(pot.scope, "value") else str(pot.scope),
+            "tier": (pot.tier.value if pot.tier and hasattr(pot.tier, "value") else (pot.tier if pot.tier else None)),
+            "game_id": pot.game_id,
+            "current_amount": int(pot.current_amount),
+            "cycle_number": pot.cycle_number,
+        })
+
+    return hits, touched
 
 
 # ----------------------------------------------------------------------

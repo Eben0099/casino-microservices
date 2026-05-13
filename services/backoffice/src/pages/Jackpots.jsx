@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Plus, X, RefreshCw, Edit2, Search, ChevronLeft, ChevronRight,
   Coins, Trophy, Globe2, Gamepad2, MapPin, Power,
 } from 'lucide-react';
 import axios from 'axios';
+import LiveIndicator from '../components/LiveIndicator';
+import { useAdminWs, useDebouncedTick } from '../hooks/useAdminWs';
 
 const PAGE_SIZE = 10;
 const POLL_MS = 5000;
@@ -83,34 +85,51 @@ function Jackpots() {
     setTimeout(() => { setError(''); setSuccess(''); }, 4000);
   };
 
+  const { connected, tick, lastEvent } = useAdminWs();
+
   // Fetch
-  const fetchPots = async () => {
+  const fetchPots = useCallback(async () => {
     try {
       const res = await axios.get('/api/tickets/admin/jackpots', config);
       setPots(res.data);
     } catch (err) { console.error('pots', err); }
-  };
-  const fetchWins = async () => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminKey]);
+  const fetchWins = useCallback(async () => {
     try {
       const res = await axios.get('/api/tickets/admin/jackpots/wins', { ...config, params: { limit: 500 } });
       setWins(res.data);
     } catch (err) { console.error('wins', err); }
-  };
-  const fetchAgents = async () => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminKey]);
+  const fetchAgents = useCallback(async () => {
     try {
       const res = await axios.get('/api/agents', config);
       setAgents(res.data);
     } catch (err) { console.error('agents', err); }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminKey]);
 
   useEffect(() => {
     fetchAgents();
     fetchPots().finally(() => setLoading(false));
+  }, [fetchAgents, fetchPots]);
+
+  // Live refresh on WS events. jackpot_progress fires on every ticket sale —
+  // we debounce 2s to avoid hammering the API under burst load.
+  useDebouncedTick(tick, () => {
+    fetchPots();
+    if (activeTab === 'wins') fetchWins();
+  }, 2000);
+
+  // Polling fallback when WS is offline
+  useEffect(() => {
+    if (connected) return;
     const id = setInterval(fetchPots, POLL_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [connected, fetchPots]);
 
-  useEffect(() => { if (activeTab === 'wins') fetchWins(); }, [activeTab]);
+  useEffect(() => { if (activeTab === 'wins') fetchWins(); }, [activeTab, fetchWins]);
   useEffect(() => { setWinPage(1); }, [activeTab]);
 
   // KPIs
@@ -249,7 +268,8 @@ function Jackpots() {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Jackpots</h1>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Cagnottes globales, par jeu et par kiosque · 3 niveaux Bronze / Argent / Or</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <LiveIndicator connected={connected} lastEventType={lastEvent?.type} />
           <button onClick={fetchPots}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
             style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
@@ -397,19 +417,24 @@ function Jackpots() {
 
       {/* Create / Edit modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <div className="rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-xl p-6 w-full max-w-3xl my-auto"
             style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                {editingId ? 'Modifier le pot' : 'Nouveau pot'}
-              </h3>
-              <button onClick={() => setShowModal(false)} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+              <div>
+                <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                  {editingId ? 'Modifier le pot' : 'Nouveau pot'}
+                </h3>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  Renseignez les paramètres ci-dessous. Les champs restent modifiables après création (hors portée).
+                </p>
+              </div>
+              <button onClick={() => setShowModal(false)} style={{ color: 'var(--text-muted)' }} className="p-1 rounded hover:opacity-70"><X size={18} /></button>
             </div>
 
             {error && <div className="mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--red)15', color: 'var(--red)' }}>{error}</div>}
 
-            <form onSubmit={handleSave} className="space-y-4">
+            <form onSubmit={handleSave} className="space-y-5">
               <FormSection title="Portee">
                 <FieldRow>
                   <FormSelect label="Scope" value={form.scope} disabled={!!editingId}
@@ -581,7 +606,12 @@ const FormSection = ({ title, children }) => (
 );
 
 const FieldRow = ({ children }) => (
-  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">{children}</div>
+  <div
+    className="grid gap-3"
+    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}
+  >
+    {children}
+  </div>
 );
 
 const FormInput = ({ label, value, onChange, type = 'text', step, placeholder, suffix, disabled }) => (

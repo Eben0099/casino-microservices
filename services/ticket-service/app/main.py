@@ -368,7 +368,7 @@ async def create_ticket(
     #    Toute exception ici declenche un rollback complet (vente + contribs)
     #    pour rester coherent avec l'argent debite cote caisse.
     try:
-        hits = await jackpot_services.contribute_for_ticket(db, new_ticket)
+        hits, touched_pots = await jackpot_services.contribute_for_ticket(db, new_ticket)
     except Exception as e:
         await db.rollback()
         logger.error(f"TICKET_CREATE_JACKPOT_FAIL code={short_code} error={e}")
@@ -389,6 +389,18 @@ async def create_ticket(
         "bets_count": len(ticket_in.bets),
         "replay_rounds": replay_rounds,
     })
+    if touched_pots:
+        await publish_admin_event("jackpot_progress", {"pots": touched_pots})
+    for h in hits:
+        await publish_admin_event("jackpot_hit", {
+            "pot_id": str(h.pot.id),
+            "scope": h.pot.scope.value if hasattr(h.pot.scope, "value") else str(h.pot.scope),
+            "tier": (h.pot.tier.value if h.pot.tier and hasattr(h.pot.tier, "value") else (h.pot.tier if h.pot.tier else None)),
+            "trigger_ticket": short_code,
+            "winner_ticket_id": str(h.winner_ticket_id),
+            "winner_agent_id": str(h.winner_agent_id),
+            "payout": int(h.payout),
+        })
     for h in hits:
         logger.info(
             f"JACKPOT_HIT_ON_CREATE pot={h.pot.id} ticket_winner={h.winner_ticket_id} "

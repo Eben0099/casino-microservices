@@ -39,9 +39,16 @@ export function useAdminWs() {
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          // Only react to admin events (created/paid/settled). Roulette
-          // phase/result events are handled elsewhere via useRouletteWs.
-          if (msg.type === 'ticket_created' || msg.type === 'ticket_paid' || msg.type === 'round_settled' || msg.type === 'ticket_cancelled') {
+          // Only react to admin events (tickets + jackpots + settlement).
+          // Roulette phase/result events are handled elsewhere via useRouletteWs.
+          if (
+            msg.type === 'ticket_created' ||
+            msg.type === 'ticket_paid' ||
+            msg.type === 'round_settled' ||
+            msg.type === 'ticket_cancelled' ||
+            msg.type === 'jackpot_progress' ||
+            msg.type === 'jackpot_hit'
+          ) {
             setLastEvent(msg);
             setTick((t) => t + 1);
             setEventCounts((c) => ({ ...c, [msg.type]: (c[msg.type] || 0) + 1 }));
