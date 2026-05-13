@@ -1,52 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, Receipt, UserCheck, DollarSign } from 'lucide-react';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
+import LiveIndicator from '../components/LiveIndicator';
+import { useAdminWs, useDebouncedTick } from '../hooks/useAdminWs';
 
 function Dashboard() {
   const [stats, setStats] = useState({ totalWager: 0, totalPayout: 0, ticketsValidated: 0, activeAgents: 0 });
   const [performance, setPerformance] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { connected, tick, lastEvent } = useAdminWs();
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      const adminKey = localStorage.getItem('admin_key');
-      if (!adminKey) return;
-      const config = { headers: { 'x-api-key': adminKey } };
-      try {
-        const [ticketRes, agentRes, perfRes, allAgentsRes] = await Promise.all([
-          axios.get('/api/tickets/admin/stats', config),
-          axios.get('/api/agents/admin/stats', config),
-          axios.get('/api/tickets/admin/agents-performance', config).catch(() => ({ data: [] })),
-          axios.get('/api/agents', config).catch(() => ({ data: [] })),
-        ]);
-        setStats({
-          totalWager: ticketRes.data.total_wager || 0,
-          totalPayout: ticketRes.data.total_payout || 0,
-          ticketsValidated: ticketRes.data.tickets_validated || 0,
-          activeAgents: agentRes.data.active_agents || 0,
-        });
-        const agentsList = allAgentsRes.data || [];
-        setPerformance((perfRes.data || []).map(p => {
-          const agent = agentsList.find(a => String(a.id) === p.agent_id);
-          return { ...p, agent_name: agent ? agent.display_name : 'Agent Inconnu' };
-        }));
-      } catch (err) {
-        console.error('Erreur chargement stats', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchStats();
+  const fetchStats = useCallback(async () => {
+    const adminKey = localStorage.getItem('admin_key');
+    if (!adminKey) return;
+    const config = { headers: { 'x-api-key': adminKey } };
+    try {
+      const [ticketRes, agentRes, perfRes, allAgentsRes] = await Promise.all([
+        axios.get('/api/tickets/admin/stats', config),
+        axios.get('/api/agents/admin/stats', config),
+        axios.get('/api/tickets/admin/agents-performance', config).catch(() => ({ data: [] })),
+        axios.get('/api/agents', config).catch(() => ({ data: [] })),
+      ]);
+      setStats({
+        totalWager: ticketRes.data.total_wager || 0,
+        totalPayout: ticketRes.data.total_payout || 0,
+        ticketsValidated: ticketRes.data.tickets_validated || 0,
+        activeAgents: agentRes.data.active_agents || 0,
+      });
+      const agentsList = allAgentsRes.data || [];
+      setPerformance((perfRes.data || []).map(p => {
+        const agent = agentsList.find(a => String(a.id) === p.agent_id);
+        return { ...p, agent_name: agent ? agent.display_name : 'Agent Inconnu' };
+      }));
+    } catch (err) {
+      console.error('Erreur chargement stats', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // Initial fetch
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  // Debounced refresh on every admin WS event (ticket_created / paid / settled)
+  useDebouncedTick(tick, fetchStats, 1500);
+
+  // Polling fallback when WS is down (3s) — runs silently in the background
+  useEffect(() => {
+    if (connected) return; // WS handles updates
+    const id = setInterval(fetchStats, 3000);
+    return () => clearInterval(id);
+  }, [connected, fetchStats]);
 
   const ggr = stats.totalWager - stats.totalPayout;
 
   return (
     <div className="animate-fade w-full">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Vue d'ensemble</h1>
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Tableau de bord global AGDTech</p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Vue d'ensemble</h1>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Tableau de bord global AGDTech</p>
+        </div>
+        <LiveIndicator connected={connected} lastEventType={lastEvent?.type} />
       </div>
 
       {/* Stats Grid */}

@@ -96,8 +96,29 @@ async def startup_event():
     global redis_client
     redis_url = os.getenv("REDIS_URL", "redis://casino_redis:6379/0")
     redis_client = redis.from_url(redis_url, decode_responses=True)
-    
+
     asyncio.create_task(game_loop())
+    asyncio.create_task(forward_admin_events())
+
+
+async def forward_admin_events():
+    """Relais Redis -> WebSocket pour les events publies par les autres services
+    (ticket creations, payouts, settlements, etc). Permet au backoffice de
+    rafraichir ses tableaux en temps reel sans polling.
+    """
+    if not redis_client:
+        return
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("admin-events")
+    print("📡 admin-events relay attached to /ws/roulette broadcaster")
+    async for message in pubsub.listen():
+        if message["type"] != "message":
+            continue
+        try:
+            payload = json.loads(message["data"])
+        except Exception:
+            continue
+        await manager.broadcast(payload)
 
 @app.on_event("shutdown")
 async def shutdown_event():

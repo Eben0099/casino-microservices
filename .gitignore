@@ -40,3 +40,4 @@ playwright-report/
 test-results/
 phase*.png
 *.screenshot.png
+simulator-runs/

@@ -5,6 +5,7 @@ import random
 import string
 import json
 import os
+import time
 import redis.asyncio as redis
 from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException
@@ -44,6 +45,22 @@ async def health_check():
     return {"status": "ok", "service": "ticket-service", "timestamp": str(datetime.now())}
 
 redis_client = None
+
+ADMIN_EVENTS_CHANNEL = "admin-events"
+
+
+async def publish_admin_event(event_type: str, payload: dict):
+    """Diffuse un event temps reel vers les dashboards connectes via WS.
+    Non bloquant : toute erreur est loggee mais n'interrompt jamais le flow.
+    """
+    if not redis_client:
+        return
+    try:
+        msg = {"type": event_type, "ts": time.time(), **payload}
+        await redis_client.publish(ADMIN_EVENTS_CHANNEL, json.dumps(msg, default=str))
+    except Exception as e:
+        logger.error(f"PUBLISH_ADMIN_EVENT_FAIL type={event_type} error={e}")
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -135,9 +152,20 @@ async def process_settlement(round_id: str, winning_number: str):
                 logger.error(f"SETTLEMENT_ERROR ticket={ticket.short_code} error={e}")
 
         # 5. On sauvegarde tout en une seule transaction
+        won_count = sum(1 for t in tickets_to_process if t.status == TicketStatus.WON)
+        lost_count = sum(1 for t in tickets_to_process if t.status == TicketStatus.LOST)
+        total_payout_round = sum(int(t.total_payout or 0) for t in tickets_to_process)
         try:
             await db.commit()
             logger.info(f"SETTLEMENT_COMPLETE round={round_id} tickets_processed={processed}")
+            await publish_admin_event("round_settled", {
+                "round_id": round_id,
+                "winning_number": str(winning_number),
+                "processed": processed,
+                "won": won_count,
+                "lost": lost_count,
+                "total_payout": total_payout_round,
+            })
         except Exception as e:
             await db.rollback()
             logger.error(f"SETTLEMENT_COMMIT_FAILED round={round_id} error={e}")
@@ -353,6 +381,14 @@ async def create_ticket(
         f"TICKET_CREATED code={short_code} agent={ticket_in.agent_id} wager={total_wager} "
         f"round={ticket_in.round_id} bets={len(ticket_in.bets)} jackpot_hits={len(hits)}"
     )
+    await publish_admin_event("ticket_created", {
+        "short_code": short_code,
+        "agent_id": str(ticket_in.agent_id),
+        "round_id": ticket_in.round_id,
+        "total_wager": int(total_wager),
+        "bets_count": len(ticket_in.bets),
+        "replay_rounds": replay_rounds,
+    })
     for h in hits:
         logger.info(
             f"JACKPOT_HIT_ON_CREATE pot={h.pot.id} ticket_winner={h.winner_ticket_id} "
@@ -599,5 +635,10 @@ async def payout_ticket(
     await db.commit()
 
     logger.info(f"TICKET_PAID code={short_code} agent={ticket.agent_id} payout={ticket.total_payout}")
+    await publish_admin_event("ticket_paid", {
+        "short_code": short_code,
+        "agent_id": str(ticket.agent_id),
+        "payout": int(ticket.total_payout or 0),
+    })
 
     return {"status": "success", "message": f"Ticket {short_code} payé : {ticket.total_payout} XAF"}

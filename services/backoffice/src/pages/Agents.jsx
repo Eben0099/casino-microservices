@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, X, Ban, CheckCircle, Wallet, Eye, RefreshCw } from 'lucide-react';
 import axios from 'axios';
+import LiveIndicator from '../components/LiveIndicator';
+import { useAdminWs, useDebouncedTick } from '../hooks/useAdminWs';
 
 function Agents() {
   const adminKey = localStorage.getItem('admin_key');
@@ -8,6 +10,7 @@ function Agents() {
 
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { connected, tick, lastEvent } = useAdminWs();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showProvisionModal, setShowProvisionModal] = useState(false);
@@ -18,15 +21,26 @@ function Agents() {
   const [form, setForm] = useState({ phone: '', display_name: '', password: '', kiosk_name: '', kiosk_location: '' });
   const [provisionForm, setProvisionForm] = useState({ amount: '', description: '' });
 
-  const fetchAgents = async () => {
+  const fetchAgents = useCallback(async () => {
     try {
       const res = await axios.get('/api/agents', config);
       setAgents(res.data);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminKey]);
 
-  useEffect(() => { fetchAgents(); }, []);
+  useEffect(() => { fetchAgents(); }, [fetchAgents]);
+
+  // Refresh on admin events (balances change after each ticket sale / payout)
+  useDebouncedTick(tick, fetchAgents, 2500);
+
+  // Polling fallback
+  useEffect(() => {
+    if (connected) return;
+    const id = setInterval(fetchAgents, 5000);
+    return () => clearInterval(id);
+  }, [connected, fetchAgents]);
 
   const handleCreate = async (e) => {
     e.preventDefault(); setError('');
@@ -102,11 +116,14 @@ function Agents() {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Caissiers</h1>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Gerez vos agents et leurs habilitations</p>
         </div>
-        <button onClick={() => { setShowCreateModal(true); setError(''); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all hover:-translate-y-0.5"
-          style={{ background: 'var(--accent)', color: '#000' }}>
-          <Plus size={16} /> Nouveau Caissier
-        </button>
+        <div className="flex items-center gap-3">
+          <LiveIndicator connected={connected} lastEventType={lastEvent?.type} />
+          <button onClick={() => { setShowCreateModal(true); setError(''); }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all hover:-translate-y-0.5"
+            style={{ background: 'var(--accent)', color: '#000' }}>
+            <Plus size={16} /> Nouveau Caissier
+          </button>
+        </div>
       </div>
 
       {/* Table */}

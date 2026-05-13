@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { RefreshCw, ArrowUpCircle, ArrowDownCircle, Receipt, Coins, Ban, Wallet, Percent, Layers, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import axios from 'axios';
 import TicketReceipt from '../components/TicketReceipt';
+import LiveIndicator from '../components/LiveIndicator';
+import { useAdminWs, useDebouncedTick } from '../hooks/useAdminWs';
 
 const PAGE_SIZE = 10;
 
@@ -69,7 +71,9 @@ function Transactions() {
   };
   const hasFilters = !!(qAgent || qTicket || qRef || dateFrom || dateTo);
 
-  const fetchAll = async () => {
+  const { connected, tick, lastEvent } = useAdminWs();
+
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const [txRes, statsRes] = await Promise.all([
@@ -80,9 +84,20 @@ function Transactions() {
       setGlobalStats(statsRes.data);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminKey]);
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Live refresh on WS events (debounced) — avoids 1000 refetches per second under burst load
+  useDebouncedTick(tick, fetchAll, 2000);
+
+  // Polling fallback when WS is down
+  useEffect(() => {
+    if (connected) return;
+    const id = setInterval(fetchAll, 3000);
+    return () => clearInterval(id);
+  }, [connected, fetchAll]);
 
   const openTicket = async (code) => {
     if (!code) return;
@@ -179,11 +194,14 @@ function Transactions() {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Betslip</h1>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Historique des mouvements de caisse</p>
         </div>
-        <button onClick={fetchAll}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
-          <RefreshCw size={15} /> Actualiser
-        </button>
+        <div className="flex items-center gap-3">
+          <LiveIndicator connected={connected} lastEventType={lastEvent?.type} />
+          <button onClick={fetchAll}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
+            <RefreshCw size={15} /> Actualiser
+          </button>
+        </div>
       </div>
 
       {/* KPI strip */}
