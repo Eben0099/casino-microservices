@@ -25,18 +25,22 @@ export function useAdminWs() {
   const wsRef = useRef(null);
   const retryRef = useRef(null);
   const retryDelay = useRef(1000);
+  const mountedRef = useRef(true);
 
   const connect = useCallback(() => {
+    if (!mountedRef.current) return;
     try {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (!mountedRef.current) return;
         setConnected(true);
         retryDelay.current = 1000;
       };
 
       ws.onmessage = (event) => {
+        if (!mountedRef.current) return;
         try {
           const msg = JSON.parse(event.data);
           // Only react to admin events (tickets + jackpots + settlement).
@@ -59,7 +63,9 @@ export function useAdminWs() {
       ws.onclose = () => {
         setConnected(false);
         wsRef.current = null;
+        if (!mountedRef.current) return;
         retryRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
           retryDelay.current = Math.min(retryDelay.current * 2, 30000);
           connect();
         }, retryDelay.current);
@@ -70,10 +76,18 @@ export function useAdminWs() {
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     connect();
     return () => {
-      if (wsRef.current) wsRef.current.close();
-      if (retryRef.current) clearTimeout(retryRef.current);
+      mountedRef.current = false;
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch {}
+        wsRef.current = null;
+      }
+      if (retryRef.current) {
+        clearTimeout(retryRef.current);
+        retryRef.current = null;
+      }
     };
   }, [connect]);
 
@@ -81,21 +95,35 @@ export function useAdminWs() {
 }
 
 /**
- * Helper: debounced effect that re-runs `cb` whenever `tick` changes,
- * but at most once every `delayMs`. Also fires an initial call.
+ * Throttled effect: when `tick` changes, schedule `cb` to run after `delayMs`.
+ * Crucially, subsequent tick changes during the wait do NOT reset the timer —
+ * they just mark the batch as pending. This guarantees AT LEAST one call per
+ * `delayMs` while events keep flowing, and AT MOST one call per `delayMs`.
+ *
+ * The naive "reset timer on every tick" debounce never fires under burst load
+ * because events arrive faster than the timeout.
  */
 export function useDebouncedTick(tick, cb, delayMs = 1500) {
   const timerRef = useRef(null);
+  const pendingRef = useRef(false);
   const cbRef = useRef(cb);
   cbRef.current = cb;
 
   useEffect(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
+    if (tick === 0) return; // skip the initial render (tick starts at 0)
+    pendingRef.current = true;
+    if (timerRef.current) return; // already scheduled — let it run
     timerRef.current = setTimeout(() => {
-      try { cbRef.current(); } catch {}
+      timerRef.current = null;
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        try { cbRef.current(); } catch {}
+      }
     }, delayMs);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [tick, delayMs]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
 }
