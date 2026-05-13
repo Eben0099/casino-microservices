@@ -49,6 +49,8 @@ export const en = {
       HALF: 'High / Low',
       SECTOR: 'Sector',
       HALF_COLOR: 'High/Low × Color',
+      LINES: 'Lines',
+      MIRROR: 'Mirror',
     },
     typeShort: {
       STRAIGHT: 'Straight',
@@ -63,6 +65,14 @@ export const en = {
       HALF: 'Low/High',
       SECTOR: 'Sector',
       HALF_COLOR: 'L/H × Color',
+      LINES: 'Lines',
+      MIRROR: 'Mirror',
+    },
+    lines: {
+      bandTitle: 'LINES (6-num bands)',
+    },
+    mirror: {
+      bandTitle: 'MIRROR PAIRS',
     },
     sector: {
       label: 'Sector',

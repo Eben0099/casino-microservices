@@ -4,6 +4,7 @@ import { useT } from '../i18n';
 
 export const BET_MODES = [
   { id: 'STRAIGHT',   mult: 36 },
+  { id: 'MIRROR',     mult: 18 },
   { id: 'SPLIT',      mult: 18 },
   { id: 'STREET',     mult: 12 },
   { id: 'CORNER',     mult: 9  },
@@ -15,6 +16,7 @@ export const BET_MODES = [
   { id: 'COLOR',      mult: 2  },
   { id: 'EVEN_ODD',   mult: 2  },
   { id: 'HALF',       mult: 2  },
+  { id: 'LINES',      mult: 2  },
 ];
 
 // Restrict the POS to the bet types the Unity Pay Table actually exposes.
@@ -22,18 +24,20 @@ export const BET_MODES = [
 // add the ID to this Set to reactivate.
 export const ENABLED_BET_TYPES = new Set([
   'STRAIGHT',
+  'MIRROR',
   'DOZEN',
   'COLOR',
   'EVEN_ODD',
   'HALF',
   'HALF_COLOR',
   'SECTOR',
+  'LINES',
 ]);
 
 /* Three groups for visual breathing room — same idea as the bet slip rows */
 const GROUPS = [
-  { titleKey: 'oddsTable.groups.straights', ids: ['STRAIGHT', 'SPLIT', 'STREET', 'CORNER', 'SIX_LINE'] },
-  { titleKey: 'oddsTable.groups.sections',  ids: ['SECTOR', 'HALF_COLOR', 'COLUMN', 'DOZEN'] },
+  { titleKey: 'oddsTable.groups.straights', ids: ['STRAIGHT', 'MIRROR', 'SPLIT', 'STREET', 'CORNER', 'SIX_LINE'] },
+  { titleKey: 'oddsTable.groups.sections',  ids: ['SECTOR', 'HALF_COLOR', 'COLUMN', 'DOZEN', 'LINES'] },
   { titleKey: 'oddsTable.groups.outside',   ids: ['COLOR', 'EVEN_ODD', 'HALF'] },
 ];
 

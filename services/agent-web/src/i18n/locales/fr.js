@@ -49,6 +49,8 @@ export const fr = {
       HALF: 'High / Low',
       SECTOR: 'Secteur',
       HALF_COLOR: 'Manque/Passe × Couleur',
+      LINES: 'Lignes',
+      MIRROR: 'Miroir',
     },
     typeShort: {
       STRAIGHT: 'Plein',
@@ -63,6 +65,14 @@ export const fr = {
       HALF: 'Manque/Passe',
       SECTOR: 'Secteur',
       HALF_COLOR: 'M/P × Couleur',
+      LINES: 'Lignes',
+      MIRROR: 'Miroir',
+    },
+    lines: {
+      bandTitle: 'LIGNES (×6 num.)',
+    },
+    mirror: {
+      bandTitle: 'PAIRES MIROIRS',
     },
     sector: {
       label: 'Secteur',

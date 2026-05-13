@@ -153,6 +153,15 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
           const letter = hovered.slice(7);
           return WHEEL_SECTORS[letter]?.includes(n) ?? false;
         }
+        if (hovered.startsWith('lines-')) {
+          const band = hovered.slice(6); // "1-6" etc.
+          const [a, b] = band.split('-').map(Number);
+          return n >= a && n <= b;
+        }
+        if (hovered.startsWith('mirror-')) {
+          const pair = hovered.slice(7); // "1,10" etc.
+          return pair.split(',').map(Number).includes(n);
+        }
         if (hovered.startsWith('hc-')) {
           // Combination LOW/HIGH × RED/BLACK — 9 numbers each
           const combo = hovered.slice(3); // LOW_RED | LOW_BLACK | HIGH_RED | HIGH_BLACK
@@ -573,6 +582,80 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         ))}
         <div />
       </div>
+
+      {/* Lines — 6 bands of 6 consecutive numbers, payout x2 (per Unity Pay Table) */}
+      {ENABLED_BET_TYPES.has('LINES') && (
+        <div style={{
+          marginTop: 6,
+          display: 'grid', gridTemplateColumns: '52px repeat(6, 1fr) 44px', gap: 0,
+          position: 'relative', zIndex: 1,
+          ...sectionDim('LINES'),
+        }}>
+          <div />
+          {['1-6', '7-12', '13-18', '19-24', '25-30', '31-36'].map(band => (
+            <OutBtn
+              key={`lines-${band}`}
+              id={`lines-${band}`}
+              type="LINES"
+              onClick={() => addBet('LINES', band)}
+              h={14}
+            >
+              <span style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
+                fontFamily: "'Outfit', sans-serif",
+              }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 900, letterSpacing: '0.04em' }}>
+                  {band}
+                </span>
+                <span style={{
+                  fontSize: '0.55rem', fontWeight: 700, opacity: 0.75,
+                  letterSpacing: '0.06em', marginTop: 2,
+                }}>
+                  x2
+                </span>
+              </span>
+            </OutBtn>
+          ))}
+          <div />
+        </div>
+      )}
+
+      {/* Mirror — 6 pairs of digit-mirror numbers, payout x18 (per Unity Pay Table) */}
+      {ENABLED_BET_TYPES.has('MIRROR') && (
+        <div style={{
+          marginTop: 6,
+          display: 'grid', gridTemplateColumns: '52px repeat(6, 1fr) 44px', gap: 0,
+          position: 'relative', zIndex: 1,
+          ...sectionDim('MIRROR'),
+        }}>
+          <div />
+          {['1,10', '2,20', '3,30', '12,21', '13,31', '23,32'].map(pair => (
+            <OutBtn
+              key={`mirror-${pair}`}
+              id={`mirror-${pair}`}
+              type="MIRROR"
+              onClick={() => addBet('MIRROR', pair)}
+              h={14}
+            >
+              <span style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
+                fontFamily: "'Outfit', sans-serif",
+              }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 900, letterSpacing: '0.04em' }}>
+                  {pair.replace(',', ' · ')}
+                </span>
+                <span style={{
+                  fontSize: '0.55rem', fontWeight: 700, opacity: 0.75,
+                  letterSpacing: '0.06em', marginTop: 2,
+                }}>
+                  x18
+                </span>
+              </span>
+            </OutBtn>
+          ))}
+          <div />
+        </div>
+      )}
 
       {/* Table branding */}
       <div style={{

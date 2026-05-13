@@ -118,5 +118,45 @@ def calculate_payout(bet_type: str, bet_target: str, amount: int, winning_number
         if bet_target == "HIGH_RED"  and is_high and is_red:   return amount * 4
         if bet_target == "HIGH_BLACK" and is_high and is_black: return amount * 4
 
+    # 13. Lignes (Lines) - 2x
+    # bet_target = "1-6" | "7-12" | "13-18" | "19-24" | "25-30" | "31-36"
+    # 6 bandes de 6 numéros consécutifs. 0 perd toujours.
+    # Payout x2 imposé par la Unity Pay Table (RTP volontairement bas — cf. layout).
+    elif bet_type == "LINES":
+        if win_n == "0":
+            return 0
+        n = int(win_n)
+        bands = {
+            "1-6":   (1, 6),
+            "7-12":  (7, 12),
+            "13-18": (13, 18),
+            "19-24": (19, 24),
+            "25-30": (25, 30),
+            "31-36": (31, 36),
+        }
+        rng = bands.get(bet_target)
+        if rng and rng[0] <= n <= rng[1]:
+            return amount * 2
+
+    # 14. Miroir (Mirror) - 18x
+    # bet_target = "1,10" | "2,20" | "3,30" | "12,21" | "13,31" | "23,32"
+    # 6 paires de chiffres miroirs (les seules valides en 0-36).
+    # P(win) = 2/37, payout x18 → RTP 36/37 = 97.30%, même house edge.
+    # 0 n'a pas de miroir, perd toujours.
+    elif bet_type == "MIRROR":
+        if win_n == "0":
+            return 0
+        pairs = {
+            "1,10":  {"1", "10"},
+            "2,20":  {"2", "20"},
+            "3,30":  {"3", "30"},
+            "12,21": {"12", "21"},
+            "13,31": {"13", "31"},
+            "23,32": {"23", "32"},
+        }
+        targets = pairs.get(bet_target)
+        if targets and win_n in targets:
+            return amount * 18
+
     # Par défaut, perdu
     return 0
