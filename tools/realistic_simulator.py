@@ -243,9 +243,18 @@ async def kiosk_session(
     output_dir: Path,
     save_lock: asyncio.Lock,
 ):
-    """One kiosk fires 1..N tickets, jittered across the betting window."""
-    weights = TICKETS_PER_KIOSK_WEIGHTS[: tickets_max - tickets_min + 1] or [1]
-    n_tickets = random.choices(range(tickets_min, tickets_max + 1), weights=weights, k=1)[0]
+    """One kiosk fires N tickets, jittered across the betting window.
+
+    For small ranges (1..5) we use the realistic weighted distribution.
+    For larger ranges (e.g. 200..300 for stress tests) we just pick uniformly
+    — the weights array is only meaningful for small counts.
+    """
+    range_size = tickets_max - tickets_min + 1
+    if 0 < range_size <= len(TICKETS_PER_KIOSK_WEIGHTS):
+        weights = TICKETS_PER_KIOSK_WEIGHTS[:range_size]
+        n_tickets = random.choices(range(tickets_min, tickets_max + 1), weights=weights, k=1)[0]
+    else:
+        n_tickets = random.randint(tickets_min, tickets_max)
     # Spread evenly with random jitter; leave a 1s safety margin before BetsClosing
     safe_window = max(0.5, betting_remaining - 1.0)
     delays = sorted(random.uniform(0, safe_window) for _ in range(n_tickets))
