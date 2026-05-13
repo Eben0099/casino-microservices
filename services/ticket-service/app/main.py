@@ -105,70 +105,86 @@ async def listen_to_roulette_results():
                     except Exception as e:
                         logger.error(f"REPLAY_GENERATION_FAIL round={round_id} error={e}")
 
+SETTLEMENT_BATCH_SIZE = int(os.getenv("SETTLEMENT_BATCH_SIZE", "500"))
+
+
 async def process_settlement(round_id: str, winning_number: str):
-    """Calcule les gains et met à jour la base de données"""
-    # On utilise AsyncSessionLocal pour ouvrir une connexion hors requête HTTP
-    async with AsyncSessionLocal() as db:
-        # 1. Tickets de ce tour pas encore regles (PENDING ou deja WON via jackpot)
-        result = await db.execute(
-            select(Ticket)
-            .options(selectinload(Ticket.bets))
-            .where(
-                Ticket.round_id == round_id,
-                Ticket.status.in_([TicketStatus.PENDING, TicketStatus.WON]),
-            )
-        )
-        tickets_to_process = result.scalars().all()
+    """Calcule les gains et met à jour la base de données par batchs.
 
-        if not tickets_to_process:
-            logger.info(f"SETTLEMENT round={round_id} no_pending_tickets")
-            return
+    Sous charge (>1k tickets), un commit unique tient la table tickets en lock
+    pendant des secondes. On batchifie par chunks (defaut 500) : chaque chunk
+    fait ses UPDATEs et commit, liberant les locks plus tot. Latence percue
+    bien meilleure cote dashboard car les premiers tickets sont visibles WON
+    avant que tout le round soit traite.
+    """
+    total_processed = 0
+    total_won = 0
+    total_lost = 0
+    total_payout_round = 0
+    offset = 0
 
-        processed = 0
-        for ticket in tickets_to_process:
-            try:
-                roulette_payout = 0
-                ticket.winning_number = str(winning_number)
-
-                # 2. On calcule le gain de chaque ligne de pari
-                for bet in ticket.bets:
-                    payout = calculate_payout(bet.bet_type, bet.bet_target, bet.amount, winning_number)
-                    bet.payout = payout
-                    bet.is_winning = (payout > 0)
-                    roulette_payout += payout
-
-                # 3. On ADDITIONNE au total_payout (qui peut deja contenir un gain jackpot)
-                ticket.total_payout = (ticket.total_payout or 0) + roulette_payout
-
-                # 4. Statut final : WON si total > 0 (roulette OU jackpot), sinon LOST
-                ticket.status = TicketStatus.WON if ticket.total_payout > 0 else TicketStatus.LOST
-                processed += 1
-
-                logger.info(
-                    f"SETTLEMENT ticket={ticket.short_code} status={ticket.status.value} "
-                    f"roulette_payout={roulette_payout} total_payout={ticket.total_payout}"
+    while True:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Ticket)
+                .options(selectinload(Ticket.bets))
+                .where(
+                    Ticket.round_id == round_id,
+                    Ticket.status.in_([TicketStatus.PENDING, TicketStatus.WON]),
                 )
-            except Exception as e:
-                logger.error(f"SETTLEMENT_ERROR ticket={ticket.short_code} error={e}")
+                .order_by(Ticket.created_at)
+                .limit(SETTLEMENT_BATCH_SIZE)
+            )
+            chunk = list(result.scalars().all())
+            if not chunk:
+                break
 
-        # 5. On sauvegarde tout en une seule transaction
-        won_count = sum(1 for t in tickets_to_process if t.status == TicketStatus.WON)
-        lost_count = sum(1 for t in tickets_to_process if t.status == TicketStatus.LOST)
-        total_payout_round = sum(int(t.total_payout or 0) for t in tickets_to_process)
-        try:
-            await db.commit()
-            logger.info(f"SETTLEMENT_COMPLETE round={round_id} tickets_processed={processed}")
-            await publish_admin_event("round_settled", {
-                "round_id": round_id,
-                "winning_number": str(winning_number),
-                "processed": processed,
-                "won": won_count,
-                "lost": lost_count,
-                "total_payout": total_payout_round,
-            })
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"SETTLEMENT_COMMIT_FAILED round={round_id} error={e}")
+            for ticket in chunk:
+                try:
+                    roulette_payout = 0
+                    ticket.winning_number = str(winning_number)
+
+                    for bet in ticket.bets:
+                        payout = calculate_payout(bet.bet_type, bet.bet_target, bet.amount, winning_number)
+                        bet.payout = payout
+                        bet.is_winning = (payout > 0)
+                        roulette_payout += payout
+
+                    ticket.total_payout = (ticket.total_payout or 0) + roulette_payout
+                    ticket.status = TicketStatus.WON if ticket.total_payout > 0 else TicketStatus.LOST
+                    total_processed += 1
+                    if ticket.status == TicketStatus.WON:
+                        total_won += 1
+                    else:
+                        total_lost += 1
+                    total_payout_round += int(ticket.total_payout or 0)
+                except Exception as e:
+                    logger.error(f"SETTLEMENT_ERROR ticket={ticket.short_code} error={e}")
+
+            try:
+                await db.commit()
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"SETTLEMENT_BATCH_COMMIT_FAIL round={round_id} offset={offset} error={e}")
+                # On stoppe pour pas tourner en boucle infinie sur les memes tickets
+                break
+
+        if len(chunk) < SETTLEMENT_BATCH_SIZE:
+            break
+        offset += SETTLEMENT_BATCH_SIZE
+
+    logger.info(f"SETTLEMENT_COMPLETE round={round_id} tickets_processed={total_processed}")
+    if total_processed == 0:
+        logger.info(f"SETTLEMENT round={round_id} no_pending_tickets")
+        return
+    await publish_admin_event("round_settled", {
+        "round_id": round_id,
+        "winning_number": str(winning_number),
+        "processed": total_processed,
+        "won": total_won,
+        "lost": total_lost,
+        "total_payout": total_payout_round,
+    })
 
 @app.get("/admin/stats", dependencies=[Depends(verify_admin_key)])
 async def get_admin_stats(db: AsyncSession = Depends(get_db)):

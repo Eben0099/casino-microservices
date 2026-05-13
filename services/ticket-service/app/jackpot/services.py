@@ -214,20 +214,22 @@ def _compute_contribution(pot: JackpotPot, total_wager: int) -> int:
 # ----------------------------------------------------------------------
 
 async def contribute_for_ticket(db: AsyncSession, ticket: ticket_models.Ticket) -> tuple[List["HitResult"], List[dict]]:
-    """Alimente tous les pots eligibles.
+    """Alimente tous les pots eligibles SANS verrou explicite.
 
-    Retourne (hits, touched_pots) :
-      - hits        : liste des HITs declenches sur ce ticket
-      - touched_pots: snapshots {pot_id, current_amount, cycle_number} des pots
-                      qui ont recu une contribution (utile pour publier un
-                      event WS jackpot_progress vers le dashboard admin)
+    Strategie :
+      - Path commun (chaque ticket) : SELECT (sans lock) + UPDATE atomique avec
+        RETURNING. Postgres serialise les UPDATEs au niveau row sans bloquer
+        les autres sessions sur SELECT FOR UPDATE — gain massif de
+        concurrence sous charge.
+      - Path lent (HIT detection, rare) : SELECT FOR UPDATE sur LE pot qui a
+        franchi son seuil, pour serialiser proprement la transition de cycle.
 
-    Transaction atomique : si une etape echoue, l'appelant rollback.
+    Retourne (hits, touched_pots).
     """
     hits: List[HitResult] = []
     touched: List[dict] = []
 
-    # Lock les pots eligibles pour eviter les races
+    # 1) Liste des pots eligibles (lecture seule, pas de verrou)
     result = await db.execute(
         select(JackpotPot)
         .where(
@@ -242,7 +244,6 @@ async def contribute_for_ticket(db: AsyncSession, ticket: ticket_models.Ticket) 
                 )
             ),
         )
-        .with_for_update()
     )
     pots = list(result.scalars().all())
 
@@ -251,29 +252,73 @@ async def contribute_for_ticket(db: AsyncSession, ticket: ticket_models.Ticket) 
         if contrib <= 0:
             continue
 
-        pot.current_amount += contrib
+        # 2) Increment atomique. Le RETURNING nous donne l'etat coherent
+        #    AFTER notre contribution (Postgres serialise au niveau row).
+        upd = await db.execute(
+            update(JackpotPot)
+            .where(JackpotPot.id == pot.id)
+            .values(current_amount=JackpotPot.current_amount + contrib)
+            .returning(JackpotPot.current_amount, JackpotPot.current_threshold, JackpotPot.cycle_number)
+        )
+        row = upd.first()
+        if row is None:
+            # Le pot a ete supprime entre temps (cas marginal)
+            continue
+        new_amount, threshold, cycle = int(row[0]), int(row[1]), int(row[2])
+
         db.add(JackpotContribution(
             pot_id=pot.id,
             ticket_id=ticket.id,
-            cycle_number=pot.cycle_number,
+            cycle_number=cycle,
             amount=contrib,
-            pot_amount_after=pot.current_amount,
+            pot_amount_after=new_amount,
         ))
-
-        if pot.current_amount >= pot.current_threshold:
-            hit = await _process_hit(db, pot, ticket)
-            hits.append(hit)
 
         touched.append({
             "pot_id": str(pot.id),
             "scope": pot.scope.value if hasattr(pot.scope, "value") else str(pot.scope),
             "tier": (pot.tier.value if pot.tier and hasattr(pot.tier, "value") else (pot.tier if pot.tier else None)),
             "game_id": pot.game_id,
-            "current_amount": int(pot.current_amount),
-            "cycle_number": pot.cycle_number,
+            "current_amount": new_amount,
+            "cycle_number": cycle,
         })
 
+        # 3) Slow path : HIT detection. On verrouille SEUL ce pot et on
+        #    revalide l'etat. Si un autre ticket a deja claim le HIT, on no-op.
+        if new_amount >= threshold:
+            hit = await _try_claim_hit(db, pot.id, cycle, ticket)
+            if hit:
+                hits.append(hit)
+
     return hits, touched
+
+
+async def _try_claim_hit(
+    db: AsyncSession,
+    pot_id: UUID,
+    seen_cycle: int,
+    trigger_ticket: ticket_models.Ticket,
+) -> Optional["HitResult"]:
+    """Tente de revendiquer un HIT sur ce pot pour le cycle observe.
+
+    Retourne None si un autre ticket concurrent a deja revendique ce HIT.
+    """
+    result = await db.execute(
+        select(JackpotPot)
+        .where(
+            JackpotPot.id == pot_id,
+            JackpotPot.cycle_number == seen_cycle,
+        )
+        .with_for_update()
+    )
+    pot = result.scalar_one_or_none()
+    if pot is None:
+        # Cycle deja transitionne par un concurrent (HIT deja paye)
+        return None
+    if pot.current_amount < pot.current_threshold:
+        # Etat redescendu entre temps (improbable mais on est defensif)
+        return None
+    return await _process_hit(db, pot, trigger_ticket)
 
 
 # ----------------------------------------------------------------------

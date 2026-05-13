@@ -42,6 +42,15 @@ services:
       POSTGRES_DB: casino_agent_db
     # ports:
     #   - "5432:5432"
+    # Sized for ~500 tickets/s. Increase max_connections in step with replica
+    # count (e.g. 4 ticket-svc replicas × 40 conns + 4 agent-svc × 40 + 1 roulette ≈ 320).
+    command: >
+      postgres
+      -c max_connections=300
+      -c shared_buffers=256MB
+      -c work_mem=8MB
+      -c maintenance_work_mem=64MB
+      -c effective_cache_size=1GB
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
