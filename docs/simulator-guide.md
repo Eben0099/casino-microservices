@@ -26,34 +26,58 @@ python3 -m venv /tmp/loadtest-venv
 
 ---
 
-## 1. Bootstrap des kiosques de test (première fois)
+## 1. Bootstrap des kiosques de test
 
-Crée 200 comptes `LoadTest Kiosk` + alimente chaque caisse à 50 000 000 XAF. Idempotent.
+Crée N comptes `LoadTest Kiosk` et alimente chaque caisse à 50 000 000 XAF. **Idempotent** : tu peux le relancer pour ajouter des caissiers, ceux qui existent déjà sont préservés.
+
+> **Important** : le simulateur exige que `--kiosks-max ≤ nombre de caissiers seedés`. Si tu veux simuler jusqu'à 500 kiosques par round, tu dois en seeder au moins 500 avant.
+
+### Petite simulation (~100 kiosques max)
 
 ```bash
-/tmp/loadtest-venv/bin/python3 tools/load_test_tickets.py --agents 200 --total 50 --concurrency 10
+/tmp/loadtest-venv/bin/python3 tools/load_test_tickets.py --agents 100 --total 50 --concurrency 10
+```
+
+### Charge moyenne (~500 kiosques max) — ~1 min
+
+```bash
+/tmp/loadtest-venv/bin/python3 tools/load_test_tickets.py --agents 500 --total 50 --concurrency 10
+```
+
+### Charge lourde (~5000 kiosques max) — ~5 min (bcrypt par compte)
+
+```bash
+/tmp/loadtest-venv/bin/python3 tools/load_test_tickets.py --agents 5000 --total 50 --concurrency 10
 ```
 
 ---
 
 ## 2. Lancer le simulateur réaliste
 
-### Démo douce (~2 min, à observer dans l'UI)
+> Vérifie d'abord que tu as **assez** de caissiers seedés (étape 1). Le simulateur exige `--kiosks-max ≤ caissiers seedés`.
+
+### Démo douce — 30-60 kiosques (~2 min) — nécessite 100 caissiers seedés
 
 ```bash
 /tmp/loadtest-venv/bin/python3 tools/realistic_simulator.py --rounds 2 --kiosks-min 30 --kiosks-max 60 --tickets-per-kiosk-min 1 --tickets-per-kiosk-max 3
 ```
 
-### Journée standard (~10 min, trafic réel)
+### Journée standard — 80-200 kiosques (~10 min) — nécessite 200 caissiers seedés
 
 ```bash
 /tmp/loadtest-venv/bin/python3 tools/realistic_simulator.py --rounds 10 --kiosks-min 80 --kiosks-max 200 --tickets-per-kiosk-min 1 --tickets-per-kiosk-max 4
 ```
 
-### Pic de charge (~5 min, proche du plafond technique)
+### Pic de charge — 300-500 kiosques (~5 min) — nécessite 500 caissiers seedés
 
 ```bash
 /tmp/loadtest-venv/bin/python3 tools/realistic_simulator.py --rounds 5 --kiosks-min 300 --kiosks-max 500 --tickets-per-kiosk-min 1 --tickets-per-kiosk-max 5
+```
+
+### Megatest — 500-5000 kiosques (~20 min) — nécessite 5000 caissiers seedés
+
+```bash
+/tmp/loadtest-venv/bin/python3 tools/realistic_simulator.py --rounds 20 --kiosks-min 500 --kiosks-max 5000 --tickets-per-kiosk-min 1 --tickets-per-kiosk-max 5
 ```
 
 ### Scénario sur mesure
