@@ -34,11 +34,22 @@ def get_number_properties(number: int) -> Dict[str, Any]:
         "isHigh": is_high
     }
 
-def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
+def calculate_stats(history_entries: List[Any]) -> Dict[str, Any]:
     """
     Calcule les statistiques exactes demandées par le layout Unity.
-    history_numbers est supposé être dans l'ordre chronologique (plus ancien au plus récent).
+
+    `history_entries` est dans l'ordre chronologique (plus ancien au plus
+    recent). Chaque entree est soit un int (ancien format Redis) soit un dict
+    `{"number": int, "round_id": str|None}` (nouveau format).
     """
+    # Normalise vers (number, round_id) pour pouvoir manipuler uniformement.
+    def _num(e):
+        return e["number"] if isinstance(e, dict) else int(e)
+
+    def _rid(e):
+        return e.get("round_id") if isinstance(e, dict) else None
+
+    history_numbers = [_num(e) for e in history_entries]
     total = len(history_numbers)
     if total == 0:
         # Default empty stats with 0 splits
@@ -146,14 +157,17 @@ def calculate_stats(history_numbers: List[int]) -> Dict[str, Any]:
     # History: only the last 10 spins, in chronological order (oldest first).
     # Each entry carries the total occurrence count of that number across the
     # full tracked history — what the UI displays as "appeared N times".
-    recent = history_numbers[-10:]
+    # `round_id` lets the frontend match each spin with the round that produced
+    # it (used by the admin history table and any time-series correlation).
+    recent_entries = history_entries[-10:]
     history_compact = [
         {
-            "number": n,
-            "color": get_number_properties(n)["color"],
-            "count": frequencies[n]
+            "number": _num(e),
+            "color": get_number_properties(_num(e))["color"],
+            "count": frequencies[_num(e)],
+            "round_id": _rid(e),
         }
-        for n in recent
+        for e in recent_entries
     ]
 
     return {

@@ -168,13 +168,29 @@ async def game_loop():
     print("🎰 Moteur de Roulette (Provably Fair) + WebSockets Unity démarré !")
 
 
-    # On charge l'historique existant en base si disponible
-    history_numbers = []
+    # On charge l'historique existant en base si disponible.
+    # Format Redis : chaque entree est un JSON `{"number": int, "round_id": str|None}`.
+    # On accepte aussi l'ancien format (entier brut) pour compat ascendante : si
+    # l'instance vient d'etre mise a jour mais que la liste Redis contient encore
+    # des "23" simples, on les promeut en `{number:23, round_id:None}`.
+    history_entries = []
     try:
         if redis_client:
             redis_hist = await redis_client.lrange("roulette:history", 0, 199)
             if redis_hist:
-                history_numbers = [int(x) for x in reversed(redis_hist)]
+                for x in reversed(redis_hist):
+                    try:
+                        parsed = json.loads(x)
+                        if isinstance(parsed, dict) and "number" in parsed:
+                            history_entries.append({
+                                "number": int(parsed["number"]),
+                                "round_id": parsed.get("round_id"),
+                            })
+                        else:
+                            history_entries.append({"number": int(parsed), "round_id": None})
+                    except (ValueError, json.JSONDecodeError):
+                        # ancien format : juste un int
+                        history_entries.append({"number": int(x), "round_id": None})
     except Exception:
         pass
 
@@ -182,21 +198,24 @@ async def game_loop():
     # aléatoires pour que les stats (hot/cold/freq/percentages) aient une
     # distribution visuellement réaliste dès la 1re connexion. On ne touche
     # jamais à un historique déjà existant — la prod ne sera pas écrasée.
-    if not history_numbers and INITIAL_HISTORY_SEED_COUNT > 0:
-        history_numbers = [random.randint(0, 36) for _ in range(INITIAL_HISTORY_SEED_COUNT)]
+    if not history_entries and INITIAL_HISTORY_SEED_COUNT > 0:
+        history_entries = [
+            {"number": random.randint(0, 36), "round_id": None}
+            for _ in range(INITIAL_HISTORY_SEED_COUNT)
+        ]
         if redis_client:
             try:
                 # LPUSH met le plus récent en tête → on push de l'ancien au plus récent
-                for n in history_numbers:
-                    await redis_client.lpush("roulette:history", str(n))
+                for e in history_entries:
+                    await redis_client.lpush("roulette:history", json.dumps(e))
                 await redis_client.ltrim("roulette:history", 0, 199)
             except Exception as e:
                 print(f"[seed] Redis lpush failed: {e}")
-        print(f"[seed] Historique amorcé avec {len(history_numbers)} résultats aléatoires")
+        print(f"[seed] Historique amorcé avec {len(history_entries)} résultats aléatoires")
 
     # Pré-calcule les stats initiales pour que les clients qui se connectent
     # AVANT la fin du 1er round aient déjà un dashboard peuplé via welcome.
-    current_stats = calculate_stats(history_numbers)
+    current_stats = calculate_stats(history_entries)
 
     while True:
         try:
@@ -256,17 +275,19 @@ async def game_loop():
                 await redis_client.publish("roulette-events", json.dumps(result_revealed_payload))
 
             await asyncio.sleep(TIME_SPINNING)
-            
-            # Update history and calculate stats
-            history_numbers.append(winning_number)
-            if len(history_numbers) > 200:
-                history_numbers.pop(0)
-            
+
+            # Update history and calculate stats. On stocke `{number, round_id}`
+            # pour que le front puisse afficher quel tour a produit chaque numero.
+            entry = {"number": winning_number, "round_id": round_id}
+            history_entries.append(entry)
+            if len(history_entries) > 200:
+                history_entries.pop(0)
+
             if redis_client:
-                await redis_client.lpush("roulette:history", str(winning_number))
+                await redis_client.lpush("roulette:history", json.dumps(entry))
                 await redis_client.ltrim("roulette:history", 0, 199)
-                
-            stats_payload = calculate_stats(history_numbers)
+
+            stats_payload = calculate_stats(history_entries)
             current_stats = stats_payload
 
             # --- STATS_UPDATED ---
