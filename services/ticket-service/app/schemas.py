@@ -13,6 +13,10 @@ class TicketCreate(BaseModel):
     game_id: str = Field(..., description="Ex: ROULETTE-TBL1")
     round_id: str = Field(..., description="Ex: ROUND-4502")
     bets: List[TicketBetCreate] = Field(..., min_length=1, description="Au moins un pari requis")
+    replay_rounds: int = Field(
+        default=1, ge=1, le=10,
+        description="Re-jouer le ticket sur N rounds (1 = vente normale, max 10).",
+    )
 
 class TicketBetResponse(BaseModel):
     bet_type: str

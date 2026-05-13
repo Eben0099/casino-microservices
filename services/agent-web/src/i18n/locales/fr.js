@@ -144,6 +144,12 @@ export const fr = {
       status: 'Statut',
     },
     loadError: 'Erreur chargement ventes',
+    activePlans: 'Tickets récurrents en cours',
+    round: 'round',
+    roundsPlayed: 'rounds joués',
+    refundIfStop: 'Remboursement si arrêt',
+    stopReplay: 'Arrêter',
+    confirmCancelPlan: "Arrêter ce ticket récurrent ? Les rounds restants seront remboursés dans la caisse.",
   },
   shift: {
     title: 'Fin de service',
@@ -181,6 +187,8 @@ export const fr = {
     submit: 'Valider la vente',
     submitting: 'Validation…',
     shopFallback: 'Caisse',
+    replay: 'Re-jouer',
+    replayDebit: 'Débit ×{n} rounds',
   },
   oddsTable: {
     title: 'Cotes & Modes',

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Repeat, StopCircle } from 'lucide-react';
 import api from '../api/client';
 import TicketReceipt from '../components/TicketReceipt';
 import { useT } from '../i18n';
@@ -14,6 +15,7 @@ const STATUS_COLOR = {
 export const Ventes = () => {
   const { t, fmtN, locale } = useT();
   const [tickets, setTickets] = useState([]);
+  const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
 
@@ -21,12 +23,26 @@ export const Ventes = () => {
 
   const fetchTickets = async () => {
     try {
-      const res = await api.get('/tickets/me/recent', { params: { minutes: 15, limit: 100 } });
-      setTickets(res.data || []);
+      const [resT, resP] = await Promise.all([
+        api.get('/tickets/me/recent', { params: { minutes: 15, limit: 100 } }),
+        api.get('/tickets/plans/active'),
+      ]);
+      setTickets(resT.data || []);
+      setPlans(resP.data || []);
     } catch (err) {
       console.error(t('ventes.loadError'), err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const cancelPlan = async (planId) => {
+    if (!window.confirm(t('ventes.confirmCancelPlan'))) return;
+    try {
+      await api.post(`/tickets/plans/${planId}/cancel`);
+      fetchTickets();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Error');
     }
   };
 
@@ -54,6 +70,76 @@ export const Ventes = () => {
           </span>
         </div>
       </div>
+
+      {/* Active replay plans */}
+      {plans.length > 0 && (
+        <div style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--accent)44',
+          borderRadius: 12, padding: '12px 16px', marginBottom: 16,
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+            fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
+            textTransform: 'uppercase', color: 'var(--accent)',
+          }}>
+            <Repeat size={14} /> {t('ventes.activePlans')} · {plans.length}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {plans.map(p => {
+              const progress = p.rounds_played / p.rounds_total;
+              return (
+                <div key={p.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 12px', borderRadius: 8,
+                  background: 'var(--bg-tile)',
+                  border: '1px solid var(--border-subtle)',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {p.bets.map(b => `${b.bet_type} ${b.bet_target || ''}`).join(' · ')}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                      {fmtN(p.total_wager_per_round)} XAF / {t('ventes.round')} ·{' '}
+                      <span style={{ color: 'var(--accent)', fontWeight: 700 }}>
+                        {p.rounds_played}/{p.rounds_total}
+                      </span> {t('ventes.roundsPlayed')}
+                    </div>
+                    <div style={{
+                      marginTop: 6, height: 4, borderRadius: 4,
+                      background: 'var(--bg-elevated)', overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        width: `${progress * 100}%`, height: '100%',
+                        background: 'var(--accent)',
+                        transition: 'width 0.4s',
+                      }} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {t('ventes.refundIfStop')}:{' '}
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+                      {fmtN(p.rounds_remaining * p.total_wager_per_round)} XAF
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => cancelPlan(p.id)}
+                    title={t('ventes.stopReplay')}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '6px 12px', borderRadius: 8,
+                      background: 'transparent', color: 'var(--danger)',
+                      border: '1px solid var(--danger)44', cursor: 'pointer',
+                      fontSize: 11, fontWeight: 700,
+                    }}>
+                    <StopCircle size={13} /> {t('ventes.stopReplay')}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div style={{
         background: 'var(--bg-surface)',

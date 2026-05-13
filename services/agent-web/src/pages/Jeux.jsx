@@ -43,6 +43,7 @@ export const Jeux = () => {
   const [lastTicket, setLastTicket] = useState(null);
   const [error, setError] = useState('');
   const [jackpotHit, setJackpotHit] = useState(null);
+  const [replayRounds, setReplayRounds] = useState(1);
 
   const { pots: jackpotPots, refresh: refreshJackpots } = useKioskJackpots(user?.kiosk_code);
 
@@ -69,7 +70,8 @@ export const Jeux = () => {
   const submitTicket = async () => {
     if (bets.length === 0 || !isBettingOpen) return;
     const totalWager = bets.reduce((acc, b) => acc + b.amount, 0);
-    if (totalWager > balance) {
+    const totalDebit = totalWager * Math.max(1, Math.min(10, replayRounds));
+    if (totalDebit > balance) {
       setError(t('jeux.insufficientBalance'));
       setTimeout(() => setError(''), 4000);
       return;
@@ -81,9 +83,11 @@ export const Jeux = () => {
         game_id: 'ROULETTE-TBL1',
         round_id: gameId,
         bets,
+        replay_rounds: replayRounds,
       });
       setLastTicket(res.data);
       setBets([]);
+      setReplayRounds(1);
       await fetchBalance(user.id);
 
       // Detection HIT : status WON juste apres creation = jackpot attache au ticket.
@@ -228,6 +232,8 @@ export const Jeux = () => {
           ticketLabel={t('betSlip.titleWith', { game: 'Spin & Win' })}
           shopLabel={user?.kiosk_name || user?.name || t('betSlip.shopFallback')}
           shopMeta={gameId ? `→ ${gameId}` : null}
+          replayRounds={replayRounds}
+          onReplayChange={setReplayRounds}
         />
       </aside>
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ticket as TicketIcon, X, Trophy } from 'lucide-react';
+import { Ticket as TicketIcon, X, Trophy, Repeat } from 'lucide-react';
 import { useT } from '../i18n';
 
 const MULT = {
@@ -13,8 +13,11 @@ const BetSlip = ({
   ticketLabel,
   shopLabel,
   shopMeta,
+  replayRounds = 1,
+  onReplayChange,
 }) => {
   const { t, fmtN } = useT();
+  const REPLAY_OPTIONS = [1, 2, 3, 5, 7, 10];
 
   const getBetInfo = (bet) => {
     const mult = MULT[bet.bet_type] || 1;
@@ -38,6 +41,7 @@ const BetSlip = ({
   const resolvedTicketLabel = ticketLabel || t('betSlip.title');
   const totalWager = bets.reduce((acc, b) => acc + b.amount, 0);
   const totalPotential = bets.reduce((acc, b) => acc + b.amount * getBetInfo(b).mult, 0);
+  const totalDebit = totalWager * replayRounds;
 
   return (
     <div style={{
@@ -153,10 +157,51 @@ const BetSlip = ({
         background: 'var(--bg-elevated)',
         borderBottomLeftRadius: 12, borderBottomRightRadius: 12,
       }}>
+        {/* Replay selector */}
+        {onReplayChange && bets.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+            padding: '8px 10px', borderRadius: 8,
+            background: 'var(--bg-tile)', border: '1px solid var(--border-subtle)',
+          }}>
+            <Repeat size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: 'var(--text-muted)', flexShrink: 0,
+            }}>
+              {t('betSlip.replay')}
+            </span>
+            <div style={{ display: 'flex', gap: 3, flex: 1, justifyContent: 'flex-end' }}>
+              {REPLAY_OPTIONS.map(n => {
+                const active = replayRounds === n;
+                return (
+                  <button key={n} onClick={() => onReplayChange(n)}
+                    style={{
+                      padding: '3px 8px', borderRadius: 5,
+                      border: active ? '1.5px solid var(--accent)' : '1px solid var(--border-subtle)',
+                      background: active ? 'var(--accent)' : 'transparent',
+                      color: active ? 'var(--text-on-accent)' : 'var(--text-secondary)',
+                      fontWeight: 800, fontSize: 11, cursor: 'pointer',
+                      minWidth: 26,
+                    }}>
+                    {n === 1 ? '×1' : `×${n}`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
           <span style={{ color: 'var(--text-muted)' }}>{t('betSlip.totalWager')}</span>
           <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtN(totalWager)} XAF</span>
         </div>
+        {replayRounds > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 11 }}>
+            <span style={{ color: 'var(--text-muted)' }}>{t('betSlip.replayDebit', { n: replayRounds })}</span>
+            <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{fmtN(totalDebit)} XAF</span>
+          </div>
+        )}
         {totalPotential > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 11 }}>
             <span style={{ color: 'var(--text-muted)' }}>{t('betSlip.maxGain')}</span>

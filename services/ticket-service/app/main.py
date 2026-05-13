@@ -22,6 +22,7 @@ from .schemas import TicketCreate, TicketResponse
 from .rules import calculate_payout
 from .security import get_current_agent_id, verify_admin_key
 from .jackpot import services as jackpot_services
+from .replay import services as replay_services
 from sqlalchemy import func
 
 app = FastAPI(
@@ -33,6 +34,10 @@ app = FastAPI(
 from .jackpot.routes import admin_router as jackpot_admin_router, public_router as jackpot_public_router
 app.include_router(jackpot_admin_router)
 app.include_router(jackpot_public_router)
+
+# Module replay : plans de tickets recurrents
+from .replay.routes import router as replay_router
+app.include_router(replay_router)
 
 @app.get("/status", tags=["Health"])
 async def health_check():
@@ -63,14 +68,25 @@ async def listen_to_roulette_results():
     async for message in pubsub.listen():
         if message["type"] == "message":
             data = json.loads(message["data"])
-            
-            # On ne réagit QU'À la fin du tour
+
+            # 1) Fin de tour -> reglement des tickets PENDING
             if data.get("event") == "ROUND_FINISHED":
                 round_id = data["round_id"]
                 winning_number = data["winning_number"]
-                
+
                 logger.info(f"SETTLEMENT round={round_id} winning_number={winning_number}")
                 await process_settlement(round_id, winning_number)
+
+            # 2) Nouveau round en phase Betting -> generation des tickets fils des plans
+            elif data.get("type") == "phase_changed" and data.get("phase") == "Betting":
+                round_id = data.get("gameId")
+                if round_id:
+                    try:
+                        created = await replay_services.generate_replay_tickets_for_round(round_id)
+                        if created:
+                            logger.info(f"REPLAY_TICKETS_GENERATED round={round_id} count={created}")
+                    except Exception as e:
+                        logger.error(f"REPLAY_GENERATION_FAIL round={round_id} error={e}")
 
 async def process_settlement(round_id: str, winning_number: str):
     """Calcule les gains et met à jour la base de données"""
@@ -267,19 +283,28 @@ async def create_ticket(
         )
         db.add(new_bet)
         
-    # 5. COMMUNICATION INTER-SERVICES : Mettre à jour la caisse de l'agent
+    # 5. COMMUNICATION INTER-SERVICES : Mettre à jour la caisse de l'agent.
+    #    Si replay_rounds > 1, on debite l'integralite (N x total_wager) d'un coup.
+    replay_rounds = max(1, min(10, ticket_in.replay_rounds))
+    debit_amount = total_wager * replay_rounds
     agent_base = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8000")
     agent_url = f"{agent_base}/{ticket_in.agent_id}/provision"
     admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
+
+    debit_description = (
+        f"Vente Ticket {short_code}"
+        if replay_rounds == 1
+        else f"Vente Ticket {short_code} (+ replay {replay_rounds - 1} rounds)"
+    )
 
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
                 agent_url,
                 json={
-                    "amount": total_wager,
+                    "amount": debit_amount,
                     "tx_type": "BET_RECEIVED",
-                    "description": f"Vente Ticket {short_code}",
+                    "description": debit_description,
                     "reference": short_code
                 },
                 headers={"X-API-Key": admin_key},
@@ -291,6 +316,22 @@ async def create_ticket(
                 status_code=503,
                 detail="Le service de caisse est indisponible ou n'a pas pu traiter la mise."
             )
+
+    # Si replay demande, on cree le plan associe (rounds_remaining = replay_rounds - 1)
+    if replay_rounds > 1:
+        try:
+            await replay_services.create_plan(
+                db,
+                agent_id=ticket_in.agent_id,
+                game_id=ticket_in.game_id,
+                bets=ticket_in.bets,
+                original_ticket_id=new_ticket.id,
+                replay_rounds=replay_rounds,
+            )
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"REPLAY_PLAN_CREATE_FAIL code={short_code} error={e}")
+            raise HTTPException(status_code=500, detail="Erreur creation plan re-jeu.")
 
     # 6. Hook jackpot : alimentation des pots eligibles + detection HIT.
     #    Toute exception ici declenche un rollback complet (vente + contribs)

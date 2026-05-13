@@ -144,6 +144,12 @@ export const en = {
       status: 'Status',
     },
     loadError: 'Failed to load sales',
+    activePlans: 'Recurring tickets running',
+    round: 'round',
+    roundsPlayed: 'rounds played',
+    refundIfStop: 'Refund if stopped',
+    stopReplay: 'Stop',
+    confirmCancelPlan: 'Stop this recurring ticket? Remaining rounds will be refunded to the till.',
   },
   shift: {
     title: 'End of shift',
@@ -181,6 +187,8 @@ export const en = {
     submit: 'Submit sale',
     submitting: 'Submitting…',
     shopFallback: 'Till',
+    replay: 'Replay',
+    replayDebit: 'Debit ×{n} rounds',
   },
   oddsTable: {
     title: 'Odds & Modes',

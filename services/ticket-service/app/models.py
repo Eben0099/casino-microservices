@@ -54,3 +54,5 @@ class TicketBet(Base):
 
 # Enregistre les modeles jackpot sur la meme Base pour qu'Alembic les detecte.
 from .jackpot import models as _jackpot_models  # noqa: F401, E402
+# Idem pour le module replay (plans de ticket recurrents).
+from .replay import models as _replay_models  # noqa: F401, E402
