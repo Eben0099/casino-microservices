@@ -15,6 +15,7 @@ from .database import engine, SessionLocal
 from .models import RouletteRound
 from .rules import get_number_properties, calculate_stats
 from .settings import load_settings, save_settings, DEFAULT_SETTINGS
+from . import jackpot_service
 
 # Number of synthetic results used to populate stats on the very first boot
 # (only when Redis history is empty — never overwrites real production data).
@@ -49,15 +50,37 @@ current_stats = None
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
+        # On groupe les connexions par kiosk_id pour pouvoir broadcaster les
+        # jackpots bronze/silver/gold seulement aux clients concernés.
+        # La clé None représente les clients qui n'ont pas envoyé de kiosk_id.
+        self.by_kiosk: dict[str | None, list[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, kiosk_id: str | None = None):
         await websocket.accept()
         self.active_connections.append(websocket)
-        await self.send_welcome(websocket)
+        self.by_kiosk.setdefault(kiosk_id, []).append(websocket)
+        # On accroche le kiosk_id sur le scope du WS pour le retrouver facilement
+        # côté disconnect et pour les futurs sends ciblés.
+        try:
+            websocket.scope["kiosk_id"] = kiosk_id
+        except Exception:
+            pass
+        await self.send_welcome(websocket, kiosk_id)
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+        kiosk_id = None
+        try:
+            kiosk_id = websocket.scope.get("kiosk_id")
+        except Exception:
+            pass
+        bucket = self.by_kiosk.get(kiosk_id)
+        if bucket and websocket in bucket:
+            bucket.remove(websocket)
+            if not bucket:
+                # Nettoie le bucket vide pour éviter une croissance illimitée
+                self.by_kiosk.pop(kiosk_id, None)
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections.copy():
@@ -66,8 +89,39 @@ class ConnectionManager:
             except Exception:
                 self.disconnect(connection)
 
-    async def send_welcome(self, websocket: WebSocket):
-        # Envoie l'état instantané du jeu
+    async def broadcast_to_kiosk(self, kiosk_id: str | None, message: dict):
+        for connection in list(self.by_kiosk.get(kiosk_id, [])):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                self.disconnect(connection)
+
+    async def broadcast_jackpots(self):
+        """Envoie un `jackpot_updated` à chaque kiosk avec sa propre vue.
+
+        Coûteux si beaucoup de kiosks distincts, mais simple et toujours
+        correct : chaque client reçoit un payload complet adapté à son
+        scope.
+        """
+        # On itère sur une copie de clés car certains sends peuvent déclencher
+        # un disconnect() qui modifie le dict by_kiosk.
+        for kiosk_id in list(self.by_kiosk.keys()):
+            jackpots = await jackpot_service.get_jackpots_for_kiosk(
+                kiosk_id, redis_client
+            )
+            message = {
+                "type": "jackpot_updated",
+                "serverTime": time.time(),
+                "jackpots": jackpots,
+            }
+            await self.broadcast_to_kiosk(kiosk_id, message)
+
+    async def send_welcome(self, websocket: WebSocket, kiosk_id: str | None = None):
+        # Envoie l'état instantané du jeu + le snapshot jackpots pour que
+        # les cartes header/footer soient déjà calées sur la vérité serveur.
+        jackpots = await jackpot_service.get_jackpots_for_kiosk(
+            kiosk_id, redis_client
+        )
         welcome_msg = {
             "type": "welcome",
             "serverTime": time.time(),
@@ -75,7 +129,8 @@ class ConnectionManager:
             "currentPhase": current_game_state["phase"],
             "phaseStartedAt": current_game_state["started_at"],
             "phaseDuration": current_game_state["duration"],
-            "result": current_game_state["result"]
+            "result": current_game_state["result"],
+            "jackpots": jackpots,
         }
         await websocket.send_json(welcome_msg)
 
@@ -97,8 +152,15 @@ async def startup_event():
     redis_url = os.getenv("REDIS_URL", "redis://casino_redis:6379/0")
     redis_client = redis.from_url(redis_url, decode_responses=True)
 
+    # Seed les lignes globales (general, spin2win) si la table est vide.
+    try:
+        await jackpot_service.ensure_seeded(redis_client)
+    except Exception as e:
+        print(f"⚠️  jackpot ensure_seeded failed: {e}")
+
     asyncio.create_task(game_loop())
     asyncio.create_task(forward_admin_events())
+    asyncio.create_task(consume_jackpot_events())
 
 
 async def forward_admin_events():
@@ -119,6 +181,45 @@ async def forward_admin_events():
         except Exception:
             continue
         await manager.broadcast(payload)
+
+
+async def consume_jackpot_events():
+    """Consomme `jackpot-events` (publié par ticket-service après settlement).
+
+    Shape attendue : `{"event": "ROUND_SETTLED", "round_id": "...",
+    "total_wager": <int>, "per_kiosk_wager": {"AB12": 30000, ...}}`.
+
+    On applique l'incrément (globaux + per-kiosk), puis on broadcast un
+    `jackpot_updated` à chaque kiosk avec sa vue. Simple et toujours
+    correct — chaque client se ré-ancre à la vérité serveur.
+    """
+    if not redis_client:
+        return
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("jackpot-events")
+    print("💰 jackpot-events consumer attached")
+    async for message in pubsub.listen():
+        if message["type"] != "message":
+            continue
+        try:
+            payload = json.loads(message["data"])
+        except Exception:
+            continue
+        if payload.get("event") != "ROUND_SETTLED":
+            continue
+        try:
+            total_wager = int(payload.get("total_wager") or 0)
+            per_kiosk_wager = payload.get("per_kiosk_wager") or {}
+            if not isinstance(per_kiosk_wager, dict):
+                per_kiosk_wager = {}
+            await jackpot_service.apply_round_settlement(
+                redis_client, total_wager, per_kiosk_wager
+            )
+            # Push a fresh snapshot to every connected kiosk so the cards
+            # re-anchor to truth right after settlement.
+            await manager.broadcast_jackpots()
+        except Exception as e:
+            print(f"⚠️  jackpot settlement failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -301,6 +402,16 @@ async def game_loop():
             if redis_client:
                 await redis_client.publish("roulette-events", json.dumps(stats_updated_payload))
 
+            # --- JACKPOT_UPDATED ---
+            # Snapshot courant pour respecter l'ordre du protocole :
+            # stats_updated → jackpot_updated → phase_changed(Result).
+            # Le consumer Redis (consume_jackpot_events) republiera juste
+            # après dès que ticket-service aura settlé le round.
+            try:
+                await manager.broadcast_jackpots()
+            except Exception as e:
+                print(f"⚠️  broadcast_jackpots failed: {e}")
+
             # ==========================================
             # ÉTAT 4 : RESULT
             # ==========================================
@@ -334,7 +445,12 @@ async def game_loop():
 
 @app.websocket("/ws/roulette")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    # kiosk_id arrive en query string (`?kiosk_id=AB12`). Spec 1.1.1.
+    # On normalise les chaînes vides en None pour que les clients sans
+    # kiosk_id (ex. backoffice) tombent dans le bucket "global only".
+    raw_kid = websocket.query_params.get("kiosk_id")
+    kiosk_id = raw_kid.strip() if isinstance(raw_kid, str) and raw_kid.strip() else None
+    await manager.connect(websocket, kiosk_id)
     try:
         while True:
             data = await websocket.receive_text()
@@ -393,3 +509,51 @@ async def public_settings():
         "max_stake": s["max_stake"],
         "enabled": s["enabled"],
     }
+
+
+# --- ROUTES JACKPOTS ---
+
+@app.get("/jackpots")
+async def get_jackpots(kiosk_id: str | None = None):
+    """Lecture publique du dict jackpots (5 clés) pour ce kiosk.
+
+    Si `kiosk_id` est absent, les 3 valeurs per-kiosk valent 0
+    (fallback documenté — le client Unity tolère ce cas).
+    """
+    kid = kiosk_id.strip() if isinstance(kiosk_id, str) and kiosk_id.strip() else None
+    jackpots = await jackpot_service.get_jackpots_for_kiosk(kid, redis_client)
+    return {"jackpots": jackpots, "kiosk_id": kid}
+
+
+@app.patch("/admin/jackpots", dependencies=[Depends(verify_admin_key)])
+async def patch_jackpots(payload: dict):
+    """Override admin des valeurs/contribution_pct + broadcast immédiat.
+
+    Body : `{"<name>": {"value": <long>, "contribution_pct": <float>,
+    "kiosk_id": "<id or null>"}, ...}`.
+    """
+    try:
+        affected = await jackpot_service.admin_set_jackpots(redis_client, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    broadcast_global, kiosks = jackpot_service.affected_kiosks_to_broadcast_scope(
+        affected
+    )
+
+    if broadcast_global:
+        # Une clé globale a bougé → tout le monde doit recevoir un snapshot frais.
+        await manager.broadcast_jackpots()
+    else:
+        # Seulement les kiosks impactés
+        for kid in kiosks:
+            jackpots = await jackpot_service.get_jackpots_for_kiosk(
+                kid, redis_client
+            )
+            await manager.broadcast_to_kiosk(kid, {
+                "type": "jackpot_updated",
+                "serverTime": time.time(),
+                "jackpots": jackpots,
+            })
+
+    return {"updated": affected}

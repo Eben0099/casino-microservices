@@ -66,6 +66,73 @@ async def publish_admin_event(event_type: str, payload: dict):
         logger.error(f"PUBLISH_ADMIN_EVENT_FAIL type={event_type} error={e}")
 
 
+# Sentinel : cache miss explicite (agent connu mais sans kiosk_code) — on
+# garde une chaine vide en Redis pour eviter de re-frapper agent-service.
+_KIOSK_CACHE_TTL = 3600
+_KIOSK_NULL_SENTINEL = ""
+
+
+async def get_agent_kiosk_code(agent_id: str) -> str | None:
+    """Resout (et cache) le kiosk_code court (4 char) d'un agent.
+
+    Strategie : Redis-cached lookup. Hot path = HIT Redis -> 1 GET ~1ms.
+    Cold path -> appel HTTP a agent-service (admin endpoint) puis cache 1h.
+    En cas d'erreur reseau on renvoie None SANS cacher : un retry au prochain
+    ticket pourra reussir.
+    """
+    if not agent_id:
+        return None
+    cache_key = f"agent:{agent_id}:kiosk_code"
+    if redis_client:
+        try:
+            cached = await redis_client.get(cache_key)
+            if cached is not None:
+                return cached or None  # "" -> None
+        except Exception as e:
+            logger.warning(f"KIOSK_CACHE_GET_FAIL agent={agent_id} error={e}")
+
+    if not http_client:
+        return None
+    agent_base = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8000")
+    admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
+    url = f"{agent_base}/admin/{agent_id}"
+    try:
+        resp = await http_client.get(url, headers={"X-API-Key": admin_key}, timeout=3.0)
+        if resp.status_code == 404:
+            # Agent inconnu cote agent-service : on cache None pour eviter le
+            # spam. Si l'agent est cree plus tard, le TTL fera retry dans 1h.
+            if redis_client:
+                try:
+                    await redis_client.setex(cache_key, _KIOSK_CACHE_TTL, _KIOSK_NULL_SENTINEL)
+                except Exception:
+                    pass
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        # Format : {"agent": {... "kiosk_code": "AB12" ...}, "caisse": {...}}
+        # On accepte aussi un payload "plat" (agent directement) au cas ou.
+        agent_blob = data.get("agent") if isinstance(data, dict) and "agent" in data else data
+        kiosk_code = None
+        if isinstance(agent_blob, dict):
+            kc = agent_blob.get("kiosk_code")
+            if isinstance(kc, str) and kc.strip():
+                kiosk_code = kc.strip()
+        if redis_client:
+            try:
+                await redis_client.setex(
+                    cache_key,
+                    _KIOSK_CACHE_TTL,
+                    kiosk_code if kiosk_code else _KIOSK_NULL_SENTINEL,
+                )
+            except Exception as e:
+                logger.warning(f"KIOSK_CACHE_SET_FAIL agent={agent_id} error={e}")
+        return kiosk_code
+    except Exception as e:
+        # Pas de cache en cas d'erreur reseau/timeout : on retentera.
+        logger.warning(f"KIOSK_LOOKUP_FAIL agent={agent_id} error={e}")
+        return None
+
+
 @app.on_event("startup")
 async def startup_event():
     global redis_client, http_client
@@ -202,6 +269,58 @@ async def process_settlement(round_id: str, winning_number: str):
         "total_payout": total_payout_round,
     })
 
+    # ------------------------------------------------------------------
+    # Jackpot growth feed : agrege les mises du round et publie sur le
+    # canal `jackpot-events`. Consomme par game-roulette-service qui fait
+    # croitre les 5 pots Unity (general, spin2win, bronze, silver, gold).
+    # On opere ici (pas dans la boucle batch) pour eviter de re-publier
+    # plusieurs fois par round. Bigint-safe : valeurs en XAF entiers.
+    # ------------------------------------------------------------------
+    try:
+        async with AsyncSessionLocal() as db:
+            total_wager_result = await db.execute(
+                select(func.coalesce(func.sum(Ticket.total_wager), 0))
+                .where(Ticket.round_id == round_id)
+            )
+            total_wager = int(total_wager_result.scalar() or 0)
+
+            # Tickets sans kiosk_code (lookup foire ou agent sans kiosque) :
+            # exclus du dict per-kiosk MAIS deja comptes dans total_wager
+            # plus haut. Ils n'alimenteront donc que les pots globaux.
+            per_kiosk_result = await db.execute(
+                select(Ticket.kiosk_code, func.sum(Ticket.total_wager))
+                .where(
+                    Ticket.round_id == round_id,
+                    Ticket.kiosk_code.isnot(None),
+                )
+                .group_by(Ticket.kiosk_code)
+            )
+            per_kiosk_wager = {
+                code: int(wager)
+                for code, wager in per_kiosk_result.all()
+                if code
+            }
+
+        if total_wager > 0 and redis_client:
+            try:
+                await redis_client.publish(
+                    "jackpot-events",
+                    json.dumps({
+                        "event": "ROUND_SETTLED",
+                        "round_id": round_id,
+                        "total_wager": total_wager,
+                        "per_kiosk_wager": per_kiosk_wager,
+                    }),
+                )
+                logger.info(
+                    f"JACKPOT_EVENT_PUBLISHED round={round_id} "
+                    f"total_wager={total_wager} kiosks={len(per_kiosk_wager)}"
+                )
+            except Exception as e:
+                logger.error(f"PUBLISH_JACKPOT_EVENT_FAIL round={round_id} error={e}")
+    except Exception as e:
+        logger.error(f"JACKPOT_AGGREGATE_FAIL round={round_id} error={e}")
+
 @app.get("/admin/stats", dependencies=[Depends(verify_admin_key)])
 async def get_admin_stats(db: AsyncSession = Depends(get_db)):
     # Total des mises
@@ -322,13 +441,18 @@ async def create_ticket(
             break
 
     # 3. Création de l'entité Ticket parent
+    # On denormalise le kiosk_code de l'agent (cached 1h cote Redis). Si le
+    # lookup echoue, on garde None : le ticket contribuera quand meme aux
+    # pots globaux mais pas aux pots du kiosque (cf jackpot-events ROUND_SETTLED).
+    kiosk_code = await get_agent_kiosk_code(str(ticket_in.agent_id))
     new_ticket = Ticket(
         short_code=short_code,
         agent_id=ticket_in.agent_id,
         game_id=ticket_in.game_id,
         round_id=ticket_in.round_id,
         total_wager=total_wager,
-        status=TicketStatus.PENDING
+        status=TicketStatus.PENDING,
+        kiosk_code=kiosk_code,
     )
     db.add(new_ticket)
     await db.flush() # Récupère l'ID du ticket pour l'associer aux paris

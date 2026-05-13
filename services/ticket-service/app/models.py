@@ -28,6 +28,11 @@ class Ticket(Base):
     status = Column(Enum(TicketStatus), default=TicketStatus.PENDING, nullable=False)
     # Lien optionnel vers le plan de re-jeu (parent + tous les fils partagent le meme plan_id).
     plan_id = Column(UUID(as_uuid=True), ForeignKey("ticket_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Denormalisation : on copie le kiosk_code de l'agent au moment de la vente.
+    # Permet l'aggregation per-kiosk au settlement sans avoir a joindre la table
+    # agents (qui vit dans la DB d'un autre service). NULL = agent sans kiosk
+    # ou lookup en echec (le ticket n'alimentera alors que les pots globaux).
+    kiosk_code = Column(String(4), nullable=True, index=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

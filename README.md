@@ -223,8 +223,10 @@ The server checks that the roulette is in the `Betting` phase **and** that `roun
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/status` | public | Current game state (round_id, phase, result) |
+| GET | `/jackpots?kiosk_id=<id>` | public | Merged jackpot dict (2 global + 3 per-kiosk). HTTP fallback for the WS feed |
 | GET | `/admin/history` | admin key | Last 10 rounds with revealed `server_seed` |
-| WS | `/ws/roulette` | public | Main WebSocket (Unity) |
+| PATCH | `/admin/jackpots` | admin key | Override `value` / `contribution_pct` per jackpot; triggers immediate broadcast |
+| WS | `/ws/roulette?kiosk_id=<id>` | public | Main WebSocket (Unity). `kiosk_id` scopes the per-kiosk jackpots (bronze/silver/gold) |
 | WS | `/api/display/ws/roulette` | public | Traefik alias (same socket) |
 
 ### `display-service` — `/api/display`
@@ -238,12 +240,16 @@ The server checks that the roulette is in the `Betting` phase **and** that `roun
 
 ## Roulette WebSocket protocol (Unity)
 
-URL: `ws://localhost/ws/roulette` (local) or `ws://<alb-dns>/ws/roulette` (prod).
+URL: `ws://localhost/ws/roulette?kiosk_id=<id>` (local) or `ws://<alb-dns>/ws/roulette?kiosk_id=<id>` (prod).
 
 **No authentication** — the connection is open. Messages are JSON. All `serverTime` fields are UNIX `float` seconds.
 
+> **`kiosk_id` query param.** Identifies the kiosk that owns the socket and scopes the per-kiosk progressive jackpots (`bronze`, `silver`, `gold`). It is opaque to the server — the Unity client typically passes the 4-char `kiosk_code` from the agent login. Missing or empty `kiosk_id` is accepted: the client still receives the two global jackpots, and the three per-kiosk values default to `0`.
+
+> **Spec source of truth.** `docs/BACKEND_PROTOCOL (1).md` is the canonical wire-format spec the Unity client follows. The summary below mirrors what the backend actually emits.
+
 ### On connect: `welcome`
-The server immediately pushes the current state.
+The server immediately pushes the current state plus the current jackpots snapshot for that kiosk.
 ```json
 {
   "type": "welcome",
@@ -252,10 +258,17 @@ The server immediately pushes the current state.
   "currentPhase": "Betting",
   "phaseStartedAt": 1714986300.0,
   "phaseDuration": 30.0,
-  "result": null
+  "result": null,
+  "jackpots": {
+    "general":  1500000,
+    "spin2win": 500000000,
+    "bronze":   2500000,
+    "silver":   25000000,
+    "gold":     45000000
+  }
 }
 ```
-> If the phase is `Spinning` or `Result`, `result` already contains `{ "number", "color", "isEven", "isHigh" }`.
+> If the phase is `Spinning` or `Result`, `result` already contains `{ "number", "color", "isEven", "isHigh" }`. `jackpots` is always present — keys are exactly `general`, `spin2win`, `bronze`, `silver`, `gold` (XAF, integer, monotonically non-decreasing between resets).
 
 ### On phase transition: `phase_changed`
 ```json
@@ -309,7 +322,7 @@ Sent right after each spin.
     "coldNumbers": [11, 28, 0, ...],
     "numberFrequencies": [3, 5, 0, 1, ..., 2],
     "history": [
-      { "number": 17, "color": "Red", "isEven": false, "isHigh": false },
+      { "number": 17, "color": "Red", "isEven": false, "isHigh": false, "count": 4, "round_id": "ROUND-1714986300" },
       ...
     ]
   }
@@ -317,8 +330,31 @@ Sent right after each spin.
 ```
 - Percentages are **always integers that sum to 100** (largest remainder method).
 - `numberFrequencies`: array of 37 ints, index = number.
-- `history`: last 200 numbers, oldest -> newest.
+- `history`: last 200 numbers, oldest -> newest. Each entry carries the Unity-required `number/color/isEven/isHigh` plus two extras (`count` = total occurrences across the tracked history, `round_id` = the round that produced this number — useful for admin correlation).
 - `hotNumbers` / `coldNumbers`: 7 entries each.
+- `sectorsPercents`: 6 entries summing to 100 across **all 37 pockets including 0** (zero belongs to sector A — wheel layout starts there).
+- `linesPercents`: 6 entries (lines 1-6, 7-12, 13-18, 19-24, 25-30, 31-36), zero excluded.
+
+### Jackpot snapshot: `jackpot_updated`
+Sent **once per round, between `stats_updated` and `phase_changed(Result)`**, and also any time an admin override touches `/admin/jackpots`. The Unity UI animates the header (`general`, `spin2win`) and footer (`bronze`, `silver`, `gold`) cards from this payload.
+```json
+{
+  "type": "jackpot_updated",
+  "serverTime": 1714986347.5,
+  "jackpots": {
+    "general":  1523500,
+    "spin2win": 501234000,
+    "bronze":   2512000,
+    "silver":   25234000,
+    "gold":     45178000
+  }
+}
+```
+- Keys are EXACTLY `general`, `spin2win`, `bronze`, `silver`, `gold` (lowercase).
+- `general` / `spin2win` are **global** (same for every connected client).
+- `bronze` / `silver` / `gold` are **per-kiosk** (depend on the `kiosk_id` of this connection).
+- Values grow from `ticket-service` settlements: each round publishes `total_wager` + `per_kiosk_wager` on Redis channel `jackpot-events`; the engine increments each pot by `floor(wager × contribution_pct)`. Default contribution percentages: general 0.3%, spin2win 0.2%, bronze 0.5%, silver 0.3%, gold 0.1% (tunable via `PATCH /admin/jackpots`).
+- Persisted in Postgres (`jackpot_state` table) — survives restarts.
 
 ### Heartbeat: `ping` / `pong`
 Client sends:

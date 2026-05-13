@@ -2,17 +2,16 @@ from typing import List, Dict, Any
 
 RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 
-# 6 sectors of 6 numbers each, sliced from the European wheel order
-# (clockwise from 0): 32 15 19 4 21 2 | 25 17 34 6 27 13 | 36 11 30 8 23 10 |
-# 5 24 16 33 1 20 | 14 31 9 22 18 29 | 7 28 12 35 3 26
-# Zero is intentionally NOT mapped: sector bets always lose on 0.
+# 6 secteurs couvrant les 37 pockets (0 inclus dans A pour aligner sur la
+# disposition de la roue Unity ou 0 est le premier pocket du secteur A).
+# A/B/C/D/E ont 6 pockets, F en a 7 (total = 37).
 SECTORS = {
-    "A": [32, 15, 19, 4, 21, 2],
-    "B": [25, 17, 34, 6, 27, 13],
-    "C": [36, 11, 30, 8, 23, 10],
-    "D": [5, 24, 16, 33, 1, 20],
-    "E": [14, 31, 9, 22, 18, 29],
-    "F": [7, 28, 12, 35, 3, 26],
+    "A": [0, 32, 15, 19, 4, 21],
+    "B": [2, 25, 17, 34, 6, 27],
+    "C": [13, 36, 11, 30, 8, 23],
+    "D": [10, 5, 24, 16, 33, 1],
+    "E": [20, 14, 31, 9, 22, 18],
+    "F": [29, 7, 28, 12, 35, 3, 26],
 }
 SECTOR_LETTERS = ("A", "B", "C", "D", "E", "F")
 SECTORS_MAP = {n: i for i, letter in enumerate(SECTOR_LETTERS) for n in SECTORS[letter]}
@@ -66,14 +65,11 @@ def calculate_stats(history_entries: List[Any]) -> Dict[str, Any]:
     dozens = [0, 0, 0]
     cols = [0, 0, 0]
     sectors = [0, 0, 0, 0, 0, 0]
-    # Lines = 12 streets of 3 consecutive non-zero numbers (1-3, 4-6, ..., 34-36)
-    lines = [0] * 12
+    # Lines = 6 lignes de 6 numeros consecutifs (1-6, 7-12, ..., 31-36) — spec Unity
+    lines = [0] * 6
 
     frequencies = [0] * 37
 
-    # 6 sectors of 6 numbers each, sliced from the European wheel order
-    # starting AFTER zero. Zero itself belongs to no sector (always loses
-    # sector bets, payout x6 keeps RTP at 97.30% across all sectors).
     sectors_map = SECTORS_MAP
 
     for n in history_numbers:
@@ -102,10 +98,10 @@ def calculate_stats(history_entries: List[Any]) -> Dict[str, Any]:
             dozens[(n - 1) // 12] += 1
             # Columns
             cols[(n - 1) % 3] += 1
-            # Lines: 12 streets of 3 numbers each ((n-1)//3 → 0..11)
-            lines[(n - 1) // 3] += 1
+            # Lines: 6 lignes de 6 numeros ((n-1)//6 → 0..5)
+            lines[(n - 1) // 6] += 1
 
-        # Sectors — 0 is intentionally outside all sectors
+        # Secteurs — 0 est inclus dans le secteur A (spec Unity)
         if n in sectors_map:
             sectors[sectors_map[n]] += 1
 
@@ -140,9 +136,9 @@ def calculate_stats(history_entries: List[Any]) -> Dict[str, Any]:
     dozens_pct = normalize_percentages(dozens, non_zero_div)
     cols_pct = normalize_percentages(cols, non_zero_div)
     lines_pct = normalize_percentages(lines, non_zero_div)
-    
-    # Sectors sum over non-zero spins only (0 belongs to no sector)
-    sectors_pct = normalize_percentages(sectors, non_zero_div)
+
+    # Secteurs couvrent les 37 pockets (0 inclus dans A) → divise par total
+    sectors_pct = normalize_percentages(sectors, total)
     
     # Hot and Cold numbers
     freq_with_num = [(frequencies[i], i) for i in range(37)]
@@ -154,21 +150,22 @@ def calculate_stats(history_entries: List[Any]) -> Dict[str, Any]:
     freq_asc = sorted(freq_with_num, key=lambda x: (x[0], x[1]))
     cold_numbers = [x[1] for x in freq_asc[:7]]
 
-    # History: only the last 10 spins, in chronological order (oldest first).
-    # Each entry carries the total occurrence count of that number across the
-    # full tracked history — what the UI displays as "appeared N times".
-    # `round_id` lets the frontend match each spin with the round that produced
-    # it (used by the admin history table and any time-series correlation).
-    recent_entries = history_entries[-10:]
-    history_compact = [
-        {
-            "number": _num(e),
-            "color": get_number_properties(_num(e))["color"],
-            "count": frequencies[_num(e)],
+    # History: jusqu'a 200 spins en ordre chronologique (le plus ancien d'abord).
+    # `isEven`/`isHigh` requis par le client Unity ; `count` et `round_id`
+    # restent en extra (count = nb d'apparitions, round_id = correlation admin).
+    recent_entries = history_entries[-200:]
+    history_compact = []
+    for e in recent_entries:
+        n = _num(e)
+        props = get_number_properties(n)
+        history_compact.append({
+            "number": n,
+            "color": props["color"],
+            "isEven": props["isEven"],
+            "isHigh": props["isHigh"],
+            "count": frequencies[n],
             "round_id": _rid(e),
-        }
-        for e in recent_entries
-    ]
+        })
 
     return {
         "redPercent": colors_pct[0],
@@ -189,8 +186,6 @@ def calculate_stats(history_entries: List[Any]) -> Dict[str, Any]:
     }
 
 def _get_empty_stats() -> Dict[str, Any]:
-    # 12-entry lines defaults: 8 cells at 8% + 4 cells at 9% = 100
-    lines_default = [8.0] * 8 + [9.0] * 4
     return {
         "redPercent": 48.6,
         "blackPercent": 48.6,
@@ -201,8 +196,8 @@ def _get_empty_stats() -> Dict[str, Any]:
         "lowPercent": 50.0,
         "dozensPercents": [33.0, 33.0, 34.0],
         "columnsPercents": [33.0, 33.0, 34.0],
-        "sectorsPercents": [16.0, 16.0, 17.0, 17.0, 17.0, 17.0],
-        "linesPercents": lines_default,
+        "sectorsPercents": [17.0, 17.0, 17.0, 17.0, 16.0, 16.0],
+        "linesPercents": [17.0, 17.0, 17.0, 17.0, 16.0, 16.0],
         "hotNumbers": [0, 1, 2, 3, 4, 5, 6],
         "coldNumbers": [36, 35, 34, 33, 32, 31, 30],
         "numberFrequencies": [0] * 37,
