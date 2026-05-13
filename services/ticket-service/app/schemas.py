@@ -40,6 +40,35 @@ class TicketResponse(BaseModel):
     winning_number: Optional[str] = None
     created_at: datetime
     bets: List[TicketBetResponse]
-    
+    plan_id: Optional[UUID4] = None    # rempli si le ticket fait partie d'une chaine de re-jeu
+
     class Config:
         from_attributes = True
+
+
+class ReplayChainSibling(BaseModel):
+    """Un ticket parmi tous ceux qui partagent le meme plan."""
+    short_code: str
+    round_id: str
+    round_index: int             # 1 = original, 2 = 2eme round, etc.
+    status: TicketStatus
+    total_wager: int
+    total_payout: int
+    winning_number: Optional[str] = None
+    is_current: bool = False     # True si c'est le ticket scanne par le caissier
+
+
+class ReplayChainInfo(BaseModel):
+    """Resume du plan + liste complete des tickets de la serie."""
+    plan_id: UUID4
+    rounds_total: int
+    rounds_played: int
+    rounds_remaining: int
+    plan_status: str             # ACTIVE | COMPLETED | CANCELLED
+    siblings: List[ReplayChainSibling]
+
+
+class TicketDetailResponse(TicketResponse):
+    """Reponse de GET /tickets/{short_code} — meme structure que TicketResponse
+    plus la chaine de re-jeu si applicable."""
+    replay_chain: Optional[ReplayChainInfo] = None

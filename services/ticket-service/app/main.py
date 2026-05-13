@@ -18,7 +18,7 @@ from uuid import UUID
 
 from .database import get_db, AsyncSessionLocal
 from .models import Ticket, TicketBet, TicketStatus
-from .schemas import TicketCreate, TicketResponse
+from .schemas import TicketCreate, TicketResponse, TicketDetailResponse
 from .rules import calculate_payout
 from .security import get_current_agent_id, verify_admin_key
 from .jackpot import services as jackpot_services
@@ -320,7 +320,7 @@ async def create_ticket(
     # Si replay demande, on cree le plan associe (rounds_remaining = replay_rounds - 1)
     if replay_rounds > 1:
         try:
-            await replay_services.create_plan(
+            plan = await replay_services.create_plan(
                 db,
                 agent_id=ticket_in.agent_id,
                 game_id=ticket_in.game_id,
@@ -328,6 +328,9 @@ async def create_ticket(
                 original_ticket_id=new_ticket.id,
                 replay_rounds=replay_rounds,
             )
+            # Lie le ticket parent au plan pour que la chaine soit reconstruite
+            # quand le caissier scanne n'importe quel ticket de la serie.
+            new_ticket.plan_id = plan.id
         except Exception as e:
             await db.rollback()
             logger.error(f"REPLAY_PLAN_CREATE_FAIL code={short_code} error={e}")
@@ -416,7 +419,20 @@ async def get_my_shift_summary(
     }
 
 
-@app.get("/admin/{short_code}", response_model=TicketResponse, dependencies=[Depends(verify_admin_key)])
+async def _ticket_with_chain(db: AsyncSession, ticket: Ticket) -> dict:
+    """Construit le payload TicketDetailResponse a partir d'un Ticket charge.
+
+    Si le ticket porte un plan_id, on annexe `replay_chain` (resume du plan +
+    tous les tickets de la serie). Le caissier scanne UN seul code et voit
+    toute la chaine, parents et enfants confondus.
+    """
+    chain = await replay_services.build_replay_chain(db, ticket)
+    payload = TicketDetailResponse.model_validate(ticket).model_dump()
+    payload["replay_chain"] = chain
+    return payload
+
+
+@app.get("/admin/{short_code}", response_model=TicketDetailResponse, dependencies=[Depends(verify_admin_key)])
 async def admin_get_ticket_by_code(
     short_code: str,
     db: AsyncSession = Depends(get_db),
@@ -430,16 +446,20 @@ async def admin_get_ticket_by_code(
     ticket = result.scalars().first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket introuvable.")
-    return ticket
+    return await _ticket_with_chain(db, ticket)
 
 
-@app.get("/{short_code}", response_model=TicketResponse)
+@app.get("/{short_code}", response_model=TicketDetailResponse)
 async def get_ticket_by_code(
     short_code: str,
     db: AsyncSession = Depends(get_db),
     agent_id: str = Depends(get_current_agent_id)
 ):
-    """Récupère les détails d'un ticket par son code court (ex: TK-2026...)"""
+    """Récupère les détails d'un ticket par son code court (ex: TK-2026...).
+
+    Si le ticket fait partie d'une chaine de re-jeu, la reponse inclut
+    `replay_chain` avec tous les tickets freres et le resume du plan.
+    """
     result = await db.execute(
         select(Ticket)
         .options(selectinload(Ticket.bets))
@@ -448,7 +468,7 @@ async def get_ticket_by_code(
     ticket = result.scalars().first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket introuvable.")
-    return ticket
+    return await _ticket_with_chain(db, ticket)
 
 @app.post("/{short_code}/cancel")
 async def cancel_ticket(

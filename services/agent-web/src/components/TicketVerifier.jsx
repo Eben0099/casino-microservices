@@ -48,6 +48,20 @@ const TicketVerifier = ({ variant = 'inline' }) => {
     }
   };
 
+  // Navigation entre les tickets d'une meme chaine de re-jeu.
+  // Le caissier clique sur un sibling dans la liste -> on recharge ce ticket.
+  const handleSelectSibling = async (siblingCode) => {
+    setLoading(true); setError('');
+    try {
+      const res = await ticketApi.getDetails(siblingCode);
+      setTicket(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || t('verify.notFound'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const isInline = variant === 'inline';
 
   return (
@@ -143,6 +157,7 @@ const TicketVerifier = ({ variant = 'inline' }) => {
           onClose={() => { setTicket(null); setCode(''); }}
           onPayout={ticket.status === 'WON' ? handlePayout : null}
           payoutLoading={payoutLoading}
+          onSelectSibling={handleSelectSibling}
         />
       )}
     </>

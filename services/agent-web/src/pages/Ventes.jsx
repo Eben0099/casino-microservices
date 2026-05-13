@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Repeat, StopCircle } from 'lucide-react';
 import api from '../api/client';
 import TicketReceipt from '../components/TicketReceipt';
+import { ticketApi } from '../api/endpoints';
 import { useT } from '../i18n';
 
 const STATUS_COLOR = {
@@ -33,6 +34,16 @@ export const Ventes = () => {
       console.error(t('ventes.loadError'), err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Ouvre le ticket avec sa chain : on refetch pour garantir replay_chain a jour
+  const openTicket = async (shortCode) => {
+    try {
+      const res = await ticketApi.getDetails(shortCode);
+      setSelected(res.data);
+    } catch {
+      setSelected(null);
     }
   };
 
@@ -183,7 +194,7 @@ export const Ventes = () => {
                 }, 0);
                 return (
                   <tr key={tk.id}
-                    onClick={() => setSelected(tk)}
+                    onClick={() => openTicket(tk.short_code)}
                     style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-elevated)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
@@ -192,7 +203,20 @@ export const Ventes = () => {
                       {fmtTime(tk.created_at)}
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
-                      {tk.short_code}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {tk.short_code}
+                        {tk.plan_id && (
+                          <span title={t('ventes.recurringTag')}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 3,
+                              padding: '1px 6px', borderRadius: 999,
+                              background: 'var(--accent)1F', color: 'var(--accent)',
+                              fontSize: 9, fontWeight: 800, letterSpacing: '0.06em',
+                            }}>
+                            <Repeat size={9} /> {t('ventes.recurringTag')}
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>
                       {fmtN(tk.total_wager)} XAF
@@ -224,6 +248,7 @@ export const Ventes = () => {
         <TicketReceipt
           ticket={selected}
           onClose={() => setSelected(null)}
+          onSelectSibling={openTicket}
         />
       )}
     </div>

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Printer, X } from 'lucide-react';
+import { Printer, X, Repeat, Trophy } from 'lucide-react';
 import { useT } from '../i18n';
 
 const BET_MULTIPLIERS = {
@@ -17,7 +17,22 @@ const getNumberColor = (n) => {
   return RED_NUMBERS.includes(num) ? '#ef4444' : '#1e293b';
 };
 
-const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain = false }) => {
+const SIBLING_STATUS_BG = {
+  PENDING: '#fef3c7',
+  WON:     '#dcfce7',
+  PAID:    '#dbeafe',
+  LOST:    '#f1f5f9',
+  CANCELLED:'#fee2e2',
+};
+const SIBLING_STATUS_FG = {
+  PENDING: '#a16207',
+  WON:     '#15803d',
+  PAID:    '#1e40af',
+  LOST:    '#475569',
+  CANCELLED:'#b91c1c',
+};
+
+const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain = false, onSelectSibling }) => {
   const { t, fmtN, locale } = useT();
 
   const getTargetLabel = (type, target) => {
@@ -151,6 +166,85 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
               <span>{createdAt ? createdAt.toLocaleString(locale, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span>
             </div>
           </div>
+
+          {/* Replay chain banner — visible si ce ticket fait partie d'une serie recurrente */}
+          {ticket.replay_chain && (
+            <div style={{
+              padding: '12px 24px', borderBottom: '2px dashed #d1d5db',
+              background: 'linear-gradient(135deg, #fef9c3 0%, #fef3c7 100%)',
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px',
+              }}>
+                <Repeat size={14} style={{ color: '#a16207' }} />
+                <span style={{
+                  fontSize: '11px', fontWeight: '900', letterSpacing: '0.2em',
+                  textTransform: 'uppercase', color: '#a16207',
+                }}>
+                  {t('ticket.recurring.title')}
+                </span>
+                <span style={{
+                  marginLeft: 'auto', fontSize: '11px', fontWeight: '800',
+                  padding: '2px 8px', borderRadius: '10px',
+                  background: '#a16207', color: '#fff',
+                }}>
+                  {ticket.replay_chain.rounds_played}/{ticket.replay_chain.rounds_total}
+                </span>
+              </div>
+
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px',
+              }}>
+                {ticket.replay_chain.siblings.map(s => (
+                  <button
+                    key={s.short_code}
+                    onClick={onSelectSibling && !s.is_current ? () => onSelectSibling(s.short_code) : undefined}
+                    disabled={s.is_current || !onSelectSibling}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '6px 10px', borderRadius: '6px',
+                      background: s.is_current ? '#fef3c7' : '#fff',
+                      border: s.is_current ? '2px solid #a16207' : '1px solid #e5d8a8',
+                      cursor: !s.is_current && onSelectSibling ? 'pointer' : 'default',
+                      fontFamily: "'Inter', monospace",
+                      textAlign: 'left', width: '100%',
+                    }}
+                  >
+                    <span style={{
+                      width: '20px', height: '20px', borderRadius: '50%',
+                      background: '#a16207', color: '#fff',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '10px', fontWeight: '900',
+                    }}>
+                      {s.round_index}
+                    </span>
+                    <span style={{ flex: 1, fontSize: '11px', fontFamily: 'monospace', color: '#1a1a1a', fontWeight: 700 }}>
+                      {s.short_code}
+                    </span>
+                    {s.total_payout > 0 && (
+                      <span style={{ fontSize: '11px', fontWeight: '800', color: '#15803d' }}>
+                        +{fmtN(s.total_payout)}
+                      </span>
+                    )}
+                    <span style={{
+                      padding: '2px 8px', borderRadius: '8px',
+                      fontSize: '9px', fontWeight: '800', letterSpacing: '0.1em', textTransform: 'uppercase',
+                      background: SIBLING_STATUS_BG[s.status] || '#f1f5f9',
+                      color: SIBLING_STATUS_FG[s.status] || '#475569',
+                    }}>
+                      {t(`status.${s.status}`)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ fontSize: '10px', color: '#92400e', fontStyle: 'italic', textAlign: 'center' }}>
+                {ticket.replay_chain.rounds_remaining > 0
+                  ? t('ticket.recurring.keepHint', { n: ticket.replay_chain.rounds_remaining })
+                  : t('ticket.recurring.completed')}
+              </div>
+            </div>
+          )}
 
           {/* Winning number (if resolved) */}
           {isResolved && ticket.winning_number != null && (

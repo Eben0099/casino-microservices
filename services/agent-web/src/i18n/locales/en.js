@@ -150,6 +150,7 @@ export const en = {
     refundIfStop: 'Refund if stopped',
     stopReplay: 'Stop',
     confirmCancelPlan: 'Stop this recurring ticket? Remaining rounds will be refunded to the till.',
+    recurringTag: 'Recurring',
   },
   shift: {
     title: 'End of shift',
@@ -223,6 +224,11 @@ export const en = {
     closeTitle: 'Close (Esc)',
     closeAria: 'Close',
     round: 'Round',
+    recurring: {
+      title: 'Recurring ticket',
+      keepHint: '{n} round(s) still to play — keep this ticket.',
+      completed: 'All rounds have been played.',
+    },
   },
   jackpots: {
     bar: { title: 'Live jackpots' },

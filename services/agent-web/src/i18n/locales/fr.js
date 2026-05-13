@@ -150,6 +150,7 @@ export const fr = {
     refundIfStop: 'Remboursement si arrêt',
     stopReplay: 'Arrêter',
     confirmCancelPlan: "Arrêter ce ticket récurrent ? Les rounds restants seront remboursés dans la caisse.",
+    recurringTag: 'Récurrent',
   },
   shift: {
     title: 'Fin de service',
@@ -223,6 +224,11 @@ export const fr = {
     closeTitle: 'Fermer (Échap)',
     closeAria: 'Fermer',
     round: 'Round',
+    recurring: {
+      title: 'Ticket récurrent',
+      keepHint: 'Encore {n} round(s) à jouer — conservez ce ticket.',
+      completed: 'Tous les rounds ont été joués.',
+    },
   },
   jackpots: {
     bar: { title: 'Cagnottes en jeu' },

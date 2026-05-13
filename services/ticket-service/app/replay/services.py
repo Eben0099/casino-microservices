@@ -106,6 +106,50 @@ async def cancel_plan(db: AsyncSession, plan_id: UUID, requesting_agent_id: UUID
     return plan, refunded_amount
 
 
+async def build_replay_chain(db: AsyncSession, ticket) -> dict | None:
+    """Si le ticket fait partie d'un plan, renvoie le resume + tous les tickets
+    freres tries par date de creation. Sinon None.
+
+    Le `round_index` est 1 pour le ticket original, 2 pour le 2eme round, etc.
+    """
+    if not ticket.plan_id:
+        return None
+
+    plan_q = await db.execute(select(TicketPlan).where(TicketPlan.id == ticket.plan_id))
+    plan = plan_q.scalars().first()
+    if not plan:
+        return None
+
+    siblings_q = await db.execute(
+        select(ticket_models.Ticket)
+        .where(ticket_models.Ticket.plan_id == plan.id)
+        .order_by(ticket_models.Ticket.created_at.asc())
+    )
+    siblings = list(siblings_q.scalars().all())
+
+    siblings_dicts = []
+    for idx, s in enumerate(siblings, start=1):
+        siblings_dicts.append({
+            "short_code": s.short_code,
+            "round_id": s.round_id,
+            "round_index": idx,
+            "status": s.status,
+            "total_wager": s.total_wager,
+            "total_payout": s.total_payout or 0,
+            "winning_number": s.winning_number,
+            "is_current": s.id == ticket.id,
+        })
+
+    return {
+        "plan_id": plan.id,
+        "rounds_total": plan.rounds_total,
+        "rounds_played": plan.rounds_played,
+        "rounds_remaining": plan.rounds_remaining,
+        "plan_status": plan.status.value if hasattr(plan.status, "value") else str(plan.status),
+        "siblings": siblings_dicts,
+    }
+
+
 async def generate_replay_tickets_for_round(round_id: str) -> int:
     """Pour chaque plan ACTIVE, cree un ticket fils sur le round courant.
     Appele depuis le listener Redis quand un nouveau round entre en phase Betting.
@@ -153,6 +197,7 @@ async def generate_replay_tickets_for_round(round_id: str) -> int:
                 round_id=round_id,
                 total_wager=plan.total_wager_per_round,
                 status=ticket_models.TicketStatus.PENDING,
+                plan_id=plan.id,    # lien parent-fils via le plan
             )
             db.add(child)
             await db.flush()  # recupere l'id
