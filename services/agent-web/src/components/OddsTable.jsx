@@ -17,6 +17,19 @@ export const BET_MODES = [
   { id: 'HALF',       mult: 2  },
 ];
 
+// Restrict the POS to the bet types the Unity Pay Table actually exposes.
+// The rest of BET_MODES stays defined so we can flip them back on later — just
+// add the ID to this Set to reactivate.
+export const ENABLED_BET_TYPES = new Set([
+  'STRAIGHT',
+  'DOZEN',
+  'COLOR',
+  'EVEN_ODD',
+  'HALF',
+  'HALF_COLOR',
+  'SECTOR',
+]);
+
 /* Three groups for visual breathing room — same idea as the bet slip rows */
 const GROUPS = [
   { titleKey: 'oddsTable.groups.straights', ids: ['STRAIGHT', 'SPLIT', 'STREET', 'CORNER', 'SIX_LINE'] },
@@ -132,7 +145,10 @@ const OddsTable = ({ value, onChange }) => {
         padding: '12px',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
-        {GROUPS.map(group => (
+        {GROUPS.map(group => {
+          const visibleIds = group.ids.filter(id => ENABLED_BET_TYPES.has(id));
+          if (visibleIds.length === 0) return null;
+          return (
           <div key={group.titleKey}>
             <div style={{
               fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
@@ -142,7 +158,7 @@ const OddsTable = ({ value, onChange }) => {
               {t(group.titleKey)}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {group.ids.map(id => {
+              {visibleIds.map(id => {
                 const mode = BET_MODES.find(m => m.id === id);
                 if (!mode) return null;
                 return (
@@ -157,7 +173,8 @@ const OddsTable = ({ value, onChange }) => {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Footer hint */}

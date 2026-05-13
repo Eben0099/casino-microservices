@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getNumberAtCoord, getCoordOfNumber, RED_NUMBERS } from './RouletteHelpers';
+import { ENABLED_BET_TYPES } from './OddsTable';
 import { useT } from '../i18n';
 
 // 6 wheel sectors of 6 numbers each, sliced from the European wheel order
@@ -87,11 +88,16 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
 
   // visibility helpers driven by mode
   const cellsClickable = betMode == null || ['STRAIGHT', 'STREET', 'SIX_LINE'].includes(betMode);
-  const showSplitH = ['SPLIT'].includes(betMode);   // make handles visible when explicitly in split mode
-  const showSplitV = ['SPLIT'].includes(betMode);
-  const showCorner = ['CORNER'].includes(betMode);
-  const allowSplitHover = betMode == null;          // legacy hover handles only in "Tous"
-  const allowCornerHover = betMode == null;
+  // SPLIT/CORNER handles only render if the type is currently enabled in the
+  // POS. With the Unity-aligned allowlist they default to hidden.
+  const splitEnabled = ENABLED_BET_TYPES.has('SPLIT');
+  const cornerEnabled = ENABLED_BET_TYPES.has('CORNER');
+  const columnEnabled = ENABLED_BET_TYPES.has('COLUMN');
+  const showSplitH = splitEnabled && ['SPLIT'].includes(betMode);
+  const showSplitV = splitEnabled && ['SPLIT'].includes(betMode);
+  const showCorner = cornerEnabled && ['CORNER'].includes(betMode);
+  const allowSplitHover = splitEnabled && betMode == null;
+  const allowCornerHover = cornerEnabled && betMode == null;
 
   // Dim a section that isn't allowed for the current mode
   const sectionDim = (type) => ({
@@ -236,7 +242,7 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         {isBettingOpen && (
           <>
             {/* SPLIT handles — visible/clickable depending on mode */}
-            {col < 11 && (
+            {splitEnabled && col < 11 && (
               <div
                 onClick={(e) => { e.stopPropagation(); handleSplitH(num, col, row); }}
                 onMouseEnter={() => setHovered(`sh-${num}`)}
@@ -253,7 +259,7 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
                 }}
               />
             )}
-            {row > 0 && (
+            {splitEnabled && row > 0 && (
               <div
                 onClick={(e) => { e.stopPropagation(); handleSplitV(num, col, row); }}
                 onMouseEnter={() => setHovered(`sv-${num}`)}
@@ -271,7 +277,7 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
               />
             )}
             {/* CORNER handle */}
-            {col < 11 && row > 0 && (
+            {cornerEnabled && col < 11 && row > 0 && (
               <div
                 onClick={(e) => { e.stopPropagation(); handleCorner(num, col, row); }}
                 onMouseEnter={() => setHovered(`cr-${num}`)}
@@ -410,36 +416,41 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
           {Array.from({ length: 36 }, (_, i) => <NumCell key={i + 1} num={i + 1} />)}
         </div>
 
-        {/* 2:1 columns */}
-        <div style={{
-          display: 'grid', gridTemplateRows: `repeat(3, ${CELL}px)`, gap: 0, width: 44,
-          ...sectionDim('COLUMN'),
-        }}>
-          {['Col3', 'Col2', 'Col1'].map((col, i) => {
-            const isH = hovered === col;
-            const allowed = allow('COLUMN');
-            return (
-              <button
-                key={col}
-                onClick={allowed ? () => addBet('COLUMN', col) : undefined}
-                disabled={disabled || !allowed}
-                onMouseEnter={() => setHovered(col)}
-                onMouseLeave={() => setHovered(null)}
-                style={{
-                  background: isH && allowed ? `${GOLD}44` : 'rgba(255,255,255,0.04)',
-                  border: `1px solid ${GOLD_B}`, color: '#fff',
-                  fontWeight: '800', fontSize: '0.7rem', letterSpacing: '0.5px',
-                  cursor: !allowed || disabled ? 'not-allowed' : 'pointer',
-                  opacity: disabled ? 0.55 : 1, transition: 'all 0.1s',
-                  borderRadius: i === 0 ? '0 6px 0 0' : i === 2 ? '0 0 6px 0' : '0',
-                  fontFamily: "'Outfit', sans-serif",
-                }}
-              >
-                2:1
-              </button>
-            );
-          })}
-        </div>
+        {/* 2:1 columns — hidden when COLUMN is not in the Unity-aligned allowlist.
+            Slot kept at 44px so the dozens/half/sectors right-edge alignment stays. */}
+        {columnEnabled ? (
+          <div style={{
+            display: 'grid', gridTemplateRows: `repeat(3, ${CELL}px)`, gap: 0, width: 44,
+            ...sectionDim('COLUMN'),
+          }}>
+            {['Col3', 'Col2', 'Col1'].map((col, i) => {
+              const isH = hovered === col;
+              const allowed = allow('COLUMN');
+              return (
+                <button
+                  key={col}
+                  onClick={allowed ? () => addBet('COLUMN', col) : undefined}
+                  disabled={disabled || !allowed}
+                  onMouseEnter={() => setHovered(col)}
+                  onMouseLeave={() => setHovered(null)}
+                  style={{
+                    background: isH && allowed ? `${GOLD}44` : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${GOLD_B}`, color: '#fff',
+                    fontWeight: '800', fontSize: '0.7rem', letterSpacing: '0.5px',
+                    cursor: !allowed || disabled ? 'not-allowed' : 'pointer',
+                    opacity: disabled ? 0.55 : 1, transition: 'all 0.1s',
+                    borderRadius: i === 0 ? '0 6px 0 0' : i === 2 ? '0 0 6px 0' : '0',
+                    fontFamily: "'Outfit', sans-serif",
+                  }}
+                >
+                  2:1
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ width: 44 }} aria-hidden />
+        )}
       </div>
 
       {/* LOW / HIGH — directement sous les chiffres concernes (1-18 / 19-36) */}
