@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Printer, X } from 'lucide-react';
 
 const BET_LABELS = {
-  STRAIGHT: 'Number', SPLIT: 'Cheval', CORNER: 'Carre', STREET: 'Transversale',
+  STRAIGHT: 'Straight/Number', SPLIT: 'Cheval', CORNER: 'Carre', STREET: 'Transversale',
   SIX_LINE: 'Sixain', DOZEN: 'Douzaine', COLUMN: 'Colonne',
   COLOR: 'Couleur', EVEN_ODD: 'Pair/Impair', HALF: 'Manque/Passe'
 };

@@ -37,7 +37,7 @@ export const en = {
   },
   bet: {
     type: {
-      STRAIGHT: 'Straight',
+      STRAIGHT: 'Straight/Number',
       SPLIT: 'Split',
       STREET: 'Street',
       CORNER: 'Corner',
@@ -53,7 +53,7 @@ export const en = {
       MIRROR: 'Mirror',
     },
     typeShort: {
-      STRAIGHT: 'Straight',
+      STRAIGHT: 'Straight/Number',
       SPLIT: 'Split',
       STREET: 'Street',
       CORNER: 'Corner',
