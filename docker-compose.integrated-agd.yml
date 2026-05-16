@@ -1,0 +1,49 @@
+# =============================================================================
+# Casino — INTEGRATED AGD mode
+# =============================================================================
+# Spawns a single on-demand instance of the Python game-roulette engine and
+# attaches it to the AGD shared docker network (`agd_default`). Consumed by
+# `agd-casino-service` via internal Docker DNS — no Traefik exposure.
+#
+# This file does NOT spin up agent-service / ticket-service / agent-web /
+# backoffice / postgres / redis. Those belong to standalone mode and use the
+# main `docker-compose.yml` of this repo.
+#
+# Usage:
+#   1. Make sure the AGD shared infra is running (cd ../AGD\ Techbet/agd && make up)
+#   2. Ensure the casino_roulette_db DB exists on agd-postgres (see
+#      scripts/bootstrap-engine-db.sh — workaround for AGD_INTEGRATION_REQUESTS REQ-010)
+#   3. docker compose -f docker-compose.integrated-agd.yml up -d --build
+# =============================================================================
+
+services:
+  # Single Python engine instance, on-demand mode.
+  # No game loop, no Unity WS — only the REST API consumed by agd-casino-service.
+  casino-roulette-engine:
+    build:
+      context: ./services/game-roulette-service
+    image: casino-roulette-engine:dev
+    container_name: casino-roulette-engine
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      - ENGINE_MODE=on_demand
+      - REDIS_URL=redis://:DevRedis2024SecurePassword@agd-redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://agd:DevPostgres2024SecurePassword@agd-postgres:5432/casino_roulette_db
+      - ROULETTE_ENGINE_INTERNAL_API_KEY=DevRouletteInternal2026
+      - ADMIN_API_KEY=DevAdminInternal2026
+    volumes:
+      - ./services/game-roulette-service:/app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/status', timeout=2); sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - agd-network
+
+networks:
+  agd-network:
+    name: agd_default
+    external: true

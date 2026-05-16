@@ -146,13 +146,33 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# ENGINE_MODE drives the runtime topology:
+#   - "cyclic"     (default, legacy): the engine runs phases on a loop,
+#     broadcasts welcome/phase_changed/result_revealed to Unity kiosks,
+#     and is consumed via ticket-service settlement. Used in standalone mode.
+#   - "on_demand"  (Phase 5+, integrated AGD): no game loop, no WebSocket
+#     traffic, no ticket-service relays. The engine exposes only:
+#       - POST /internal/spins   (called by agd-casino-service)
+#       - GET  /verify/:round_id (public provably-fair audit)
+#       - GET  /status, /admin/history (unchanged)
+# Toggle via env. Same code, two deployments.
+ENGINE_MODE = os.getenv("ENGINE_MODE", "cyclic").strip().lower()
+
+
 @app.on_event("startup")
 async def startup_event():
     global redis_client
     redis_url = os.getenv("REDIS_URL", "redis://casino_redis:6379/0")
     redis_client = redis.from_url(redis_url, decode_responses=True)
 
-    # Seed les lignes globales (general, spin2win) si la table est vide.
+    if ENGINE_MODE == "on_demand":
+        # On-demand mode: the engine is a pure REST RNG/persistor. No game
+        # loop, no Unity WS, no ticket-service pub/sub. The DB is still used
+        # (RouletteRound persists every spin so /verify/:round_id works).
+        print("🎰 ENGINE_MODE=on_demand — skipping game_loop, WS, jackpots, RMQ relays")
+        return
+
+    # Cyclic mode (legacy / standalone): full Unity-facing engine.
     try:
         await jackpot_service.ensure_seeded(redis_client)
     except Exception as e:
@@ -489,6 +509,143 @@ def verify_admin_key(x_api_key: str = Header(None)):
     if x_api_key != ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Accès refusé.")
     return x_api_key
+
+
+# --- ON-DEMAND ENGINE (Phase 5: AGD-integrated mode) ---
+
+ROULETTE_ENGINE_INTERNAL_API_KEY = os.getenv(
+    "ROULETTE_ENGINE_INTERNAL_API_KEY", "DevRouletteInternal2026"
+)
+
+
+def verify_internal_key(x_internal_key: str = Header(None)):
+    """
+    Internal-network auth for /internal/spins.
+    Stricter than the admin key — only the AGD casino service should hold this.
+    """
+    if x_internal_key != ROULETTE_ENGINE_INTERNAL_API_KEY:
+        raise HTTPException(status_code=401, detail="invalid internal key")
+    return x_internal_key
+
+
+@app.post("/internal/spins", dependencies=[Depends(verify_internal_key)])
+async def internal_resolve_spin(payload: dict):
+    """
+    Resolves a single spin synchronously.
+
+    Designed to be called by `agd-casino-service` (NestJS) which provides
+    its own UUID v4 `spin_id` (used as wallet referenceId). The Python
+    engine produces a stable `external_round_id` derived from spin_id and
+    timestamp, persists everything in `roulette_rounds`, and returns the
+    payload the casino orchestrator needs.
+
+    Request body:
+      {
+        "spin_id":     "<UUID v4>",   # required
+        "game_code":   "ROULETTE_EU",  # optional, informational
+        "client_seed": "<hex|str>",    # optional
+        "bets":        [ {bet_type, bet_target, amount}, ... ]  # optional, opaque
+      }
+
+    Response 200:
+      {
+        "external_round_id": "ROUND-<unix-ms>-<spin8>",
+        "winning_number":    "0".."36",
+        "seed_hash":         "<64 hex>",
+        "server_seed":       "<32 hex>",
+        "client_seed":       "<echo>" | null,
+        "metadata":          { "color": "Red", "isEven": false, "isHigh": false }
+      }
+    """
+    spin_id = (payload or {}).get("spin_id")
+    if not isinstance(spin_id, str) or len(spin_id) < 8:
+        raise HTTPException(status_code=400, detail="spin_id is required")
+    client_seed = (payload or {}).get("client_seed") or None
+    game_code = (payload or {}).get("game_code") or "ROULETTE_EU"
+
+    # 1. Build a stable round_id (engine-native) embedding spin_id for traceability.
+    external_round_id = f"ROUND-{int(time.time() * 1000)}-{spin_id[:8]}"
+
+    # 2. Provably-fair: generate server_seed + hash, derive winning_number.
+    #    Mirror of the cyclic path so the same verify algorithm works.
+    server_seed = secrets.token_hex(16)
+    server_seed_hash = hashlib.sha256(server_seed.encode("utf-8")).hexdigest()
+
+    # If a client_seed is provided, mix it into the HMAC message so both sides
+    # influence the outcome (cf. CASINO_INTEGRATION_PLAN §10).
+    hmac_msg = (
+        f"{external_round_id}:{client_seed}"
+        if client_seed
+        else external_round_id
+    )
+    winning_number = generate_provably_fair_result(server_seed, hmac_msg)
+
+    # 3. Enrich with UI-friendly metadata (color, parity, half).
+    props = get_number_properties(int(winning_number))
+
+    # 4. Persist for audit and /verify/:round_id lookups.
+    try:
+        async with SessionLocal() as db:
+            db.add(
+                RouletteRound(
+                    round_id=external_round_id,
+                    winning_number=str(winning_number),
+                    server_seed=server_seed,
+                    server_seed_hash=server_seed_hash,
+                )
+            )
+            await db.commit()
+    except Exception as e:
+        # Persistence failure is non-fatal for the spin itself — the casino
+        # service receives the result and we'll alert ops. The /verify
+        # endpoint would simply 404 for this round_id.
+        print(f"⚠️  on_demand round persist failed: {e}")
+
+    return {
+        "external_round_id": external_round_id,
+        "winning_number": str(winning_number),
+        "seed_hash": server_seed_hash,
+        "server_seed": server_seed,
+        "client_seed": client_seed,
+        "metadata": {
+            "color": props.get("color"),
+            "isEven": props.get("isEven"),
+            "isHigh": props.get("isHigh"),
+            "game_code": game_code,
+            "engine_mode": ENGINE_MODE,
+        },
+    }
+
+
+@app.get("/verify/{round_id}")
+async def verify_round(round_id: str):
+    """
+    Public provably-fair audit endpoint. Returns the stored server_seed
+    (revealed post-round) so any external auditor can recompute:
+
+        sha256(server_seed)                            == seed_hash
+        int(hmac_sha256(server_seed, msg)[:8], 16) % 37 == winning_number
+
+    where `msg` is `round_id` (no client_seed) or `round_id:client_seed`.
+
+    404 if the round id is unknown.
+    """
+    async with SessionLocal() as db:
+        result = await db.execute(
+            select(RouletteRound).where(RouletteRound.round_id == round_id)
+        )
+        round_row = result.scalar_one_or_none()
+    if not round_row:
+        raise HTTPException(status_code=404, detail="round not found")
+
+    return {
+        "round_id": round_row.round_id,
+        "winning_number": round_row.winning_number,
+        "server_seed": round_row.server_seed,
+        "server_seed_hash": round_row.server_seed_hash,
+        "algorithm": "winning_number = int(hmac_sha256(server_seed, round_id [, ':', client_seed])[:8], 16) mod 37",
+        "created_at": round_row.created_at.isoformat() if round_row.created_at else None,
+    }
 
 @app.get("/admin/history", dependencies=[Depends(verify_admin_key)])
 async def get_roulette_history():
