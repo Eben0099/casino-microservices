@@ -34,11 +34,13 @@ export const ENABLED_BET_TYPES = new Set([
   'LINES',
 ]);
 
-/* Three groups for visual breathing room — same idea as the bet slip rows */
+/* Ordre de la Pay Table Unity v1.1.1 :
+   NUMBER, DOZENS, RED/BLACK, EVEN/ODD, LOW/HIGH, LOW/HIGH & COLOR, MIRROR, SECTORS, LINES.
+   Les groupes sont uniquement visuels — c'est l'ordre cumulé qui doit matcher la spec. */
 const GROUPS = [
-  { titleKey: 'oddsTable.groups.straights', ids: ['STRAIGHT', 'MIRROR', 'SPLIT', 'STREET', 'CORNER', 'SIX_LINE'] },
-  { titleKey: 'oddsTable.groups.sections',  ids: ['SECTOR', 'HALF_COLOR', 'COLUMN', 'DOZEN', 'LINES'] },
-  { titleKey: 'oddsTable.groups.outside',   ids: ['COLOR', 'EVEN_ODD', 'HALF'] },
+  { titleKey: 'oddsTable.groups.straights', ids: ['STRAIGHT', 'DOZEN'] },
+  { titleKey: 'oddsTable.groups.outside',   ids: ['COLOR', 'EVEN_ODD', 'HALF', 'HALF_COLOR'] },
+  { titleKey: 'oddsTable.groups.sections',  ids: ['MIRROR', 'SECTOR', 'LINES'] },
 ];
 
 const Row = ({ mode, label, active, onClick }) => {

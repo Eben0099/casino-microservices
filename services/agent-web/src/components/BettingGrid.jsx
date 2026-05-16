@@ -550,6 +550,43 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
         <div />
       </div>
 
+      {/* Mirror — 6 pairs of digit-mirror numbers, payout x18 (per Unity Pay Table) */}
+      {ENABLED_BET_TYPES.has('MIRROR') && (
+        <div style={{
+          marginTop: 6,
+          display: 'grid', gridTemplateColumns: '52px repeat(6, 1fr) 44px', gap: 0,
+          position: 'relative', zIndex: 1,
+          ...sectionDim('MIRROR'),
+        }}>
+          <div />
+          {['1,10', '2,20', '3,30', '12,21', '13,31', '23,32'].map(pair => (
+            <OutBtn
+              key={`mirror-${pair}`}
+              id={`mirror-${pair}`}
+              type="MIRROR"
+              onClick={() => addBet('MIRROR', pair)}
+              h={14}
+            >
+              <span style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
+                fontFamily: "'Outfit', sans-serif",
+              }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 900, letterSpacing: '0.04em' }}>
+                  {pair.replace(',', ' · ')}
+                </span>
+                <span style={{
+                  fontSize: '0.55rem', fontWeight: 700, opacity: 0.75,
+                  letterSpacing: '0.06em', marginTop: 2,
+                }}>
+                  x18
+                </span>
+              </span>
+            </OutBtn>
+          ))}
+          <div />
+        </div>
+      )}
+
       {/* Wheel sectors A-F — 6 sectors of 6 numbers each, payout x6 */}
       <div style={{
         marginTop: 6,
@@ -612,43 +649,6 @@ const BettingGrid = ({ addBet, isBettingOpen, betMode = null }) => {
                   letterSpacing: '0.06em', marginTop: 2,
                 }}>
                   x2
-                </span>
-              </span>
-            </OutBtn>
-          ))}
-          <div />
-        </div>
-      )}
-
-      {/* Mirror — 6 pairs of digit-mirror numbers, payout x18 (per Unity Pay Table) */}
-      {ENABLED_BET_TYPES.has('MIRROR') && (
-        <div style={{
-          marginTop: 6,
-          display: 'grid', gridTemplateColumns: '52px repeat(6, 1fr) 44px', gap: 0,
-          position: 'relative', zIndex: 1,
-          ...sectionDim('MIRROR'),
-        }}>
-          <div />
-          {['1,10', '2,20', '3,30', '12,21', '13,31', '23,32'].map(pair => (
-            <OutBtn
-              key={`mirror-${pair}`}
-              id={`mirror-${pair}`}
-              type="MIRROR"
-              onClick={() => addBet('MIRROR', pair)}
-              h={14}
-            >
-              <span style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
-                fontFamily: "'Outfit', sans-serif",
-              }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 900, letterSpacing: '0.04em' }}>
-                  {pair.replace(',', ' · ')}
-                </span>
-                <span style={{
-                  fontSize: '0.55rem', fontWeight: 700, opacity: 0.75,
-                  letterSpacing: '0.06em', marginTop: 2,
-                }}>
-                  x18
                 </span>
               </span>
             </OutBtn>

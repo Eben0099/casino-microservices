@@ -7,6 +7,7 @@ export function useRouletteWs() {
   const [phase, setPhase] = useState(null);
   const [lastNumber, setLastNumber] = useState(null);
   const [stats, setStats] = useState(null);
+  const [jackpots, setJackpots] = useState(null);
   const wsRef = useRef(null);
   const retryRef = useRef(null);
   const retryDelay = useRef(1000);
@@ -28,6 +29,7 @@ export function useRouletteWs() {
             case 'welcome':
               setPhase(msg.currentPhase);
               if (msg.result) setLastNumber(msg.result.number);
+              if (msg.jackpots) setJackpots(msg.jackpots);
               break;
             case 'phase_changed':
               setPhase(msg.phase);
@@ -37,6 +39,9 @@ export function useRouletteWs() {
               break;
             case 'stats_updated':
               setStats(msg.stats);
+              break;
+            case 'jackpot_updated':
+              if (msg.jackpots) setJackpots(msg.jackpots);
               break;
           }
         } catch {}
@@ -63,5 +68,5 @@ export function useRouletteWs() {
     };
   }, [connect]);
 
-  return { connected, phase, lastNumber, stats };
+  return { connected, phase, lastNumber, stats, jackpots };
 }

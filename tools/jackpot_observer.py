@@ -21,6 +21,8 @@ Usage:
         --kiosk-code AB12 --fire-tickets --rounds 5
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import datetime as dt

@@ -210,8 +210,8 @@ export const fr = {
     hint: 'Cliquez sur une cote pour {lock} uniquement les zones de ce type sur le tapis.',
     hintLock: 'verrouiller',
     groups: {
-      straights: 'Pleins & combinaisons',
-      sections: 'Sections',
+      straights: 'Pleins & douzaines',
+      sections: 'Mises spéciales',
       outside: 'Paris extérieurs',
     },
   },

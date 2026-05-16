@@ -131,6 +131,27 @@ async def get_jackpots_for_kiosk(
     return out
 
 
+async def list_all_jackpots() -> list[dict]:
+    """Renvoie toutes les lignes de `jackpot_state` à plat.
+
+    Format : `[{"kiosk_id": "__GLOBAL__"|"<code>", "name": "general"...,
+    "value": int, "contribution_pct": float, "updated_at": iso}, ...]`.
+    Le frontend admin regroupe par `kiosk_id` côté UI.
+    """
+    out: list[dict] = []
+    async with SessionLocal() as db:
+        result = await db.execute(select(JackpotState))
+        for row in result.scalars().all():
+            out.append({
+                "kiosk_id": row.kiosk_id,
+                "name": row.name,
+                "value": int(row.value),
+                "contribution_pct": float(row.contribution_pct),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            })
+    return out
+
+
 async def apply_round_settlement(
     redis_client,
     total_wager: int,

@@ -704,6 +704,17 @@ async def get_jackpots(kiosk_id: str | None = None):
     return {"jackpots": jackpots, "kiosk_id": kid}
 
 
+@app.get("/admin/jackpots/all", dependencies=[Depends(verify_admin_key)])
+async def admin_list_all_jackpots():
+    """Liste toutes les lignes de `jackpot_state`.
+
+    Utilisé par le backoffice pour afficher en une vue le panneau global
+    (general/spin2win) et le tableau per-kiosk (bronze/silver/gold).
+    """
+    rows = await jackpot_service.list_all_jackpots()
+    return {"rows": rows}
+
+
 @app.patch("/admin/jackpots", dependencies=[Depends(verify_admin_key)])
 async def patch_jackpots(payload: dict):
     """Override admin des valeurs/contribution_pct + broadcast immédiat.

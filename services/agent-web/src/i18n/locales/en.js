@@ -210,8 +210,8 @@ export const en = {
     hint: 'Click an odd to {lock} only this bet type on the table.',
     hintLock: 'lock',
     groups: {
-      straights: 'Straights & combinations',
-      sections: 'Sections',
+      straights: 'Numbers & dozens',
+      sections: 'Special bets',
       outside: 'Outside bets',
     },
   },
