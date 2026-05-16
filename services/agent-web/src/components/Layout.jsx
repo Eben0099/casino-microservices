@@ -4,6 +4,7 @@ import { Sun, Moon, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useT, LanguageToggle } from '../i18n';
+import { IS_EMBED } from '../config';
 
 const NAV_KEYS = [
   { key: 'nav.games',  path: '/jeux'    },
@@ -29,6 +30,18 @@ const Layout = () => {
   const now = useClock();
 
   const handleLogout = () => { logout(); navigate('/login'); };
+
+  // Embed mode (parent webview AGD assumes auth + chrome): render the
+  // page surface without the top nav so the host page controls layout.
+  if (IS_EMBED) {
+    return (
+      <div className="agd-shell agd-shell-embed" style={{ minHeight: '100vh', background: 'var(--bg-base)' }}>
+        <main style={{ padding: '12px', width: '100%' }}>
+          <Outlet />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="agd-shell" style={{ minHeight: '100vh', background: 'var(--bg-base)', display: 'flex', flexDirection: 'column' }}>
