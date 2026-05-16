@@ -15,7 +15,7 @@ from .database import engine, SessionLocal
 from .models import RouletteRound
 from .rules import get_number_properties, calculate_stats
 from .settings import load_settings, save_settings, DEFAULT_SETTINGS
-from . import jackpot_service
+from . import jackpot_service, kiosk_validator
 
 # Number of synthetic results used to populate stats on the very first boot
 # (only when Redis history is empty — never overwrites real production data).
@@ -449,7 +449,17 @@ async def websocket_endpoint(websocket: WebSocket):
     # On normalise les chaînes vides en None pour que les clients sans
     # kiosk_id (ex. backoffice) tombent dans le bucket "global only".
     raw_kid = websocket.query_params.get("kiosk_id")
-    kiosk_id = raw_kid.strip() if isinstance(raw_kid, str) and raw_kid.strip() else None
+    kiosk_id = raw_kid.strip().upper() if isinstance(raw_kid, str) and raw_kid.strip() else None
+
+    # Si un kiosk_id est fourni, on le valide contre agent-service AVANT
+    # d'accepter la connexion. Code introuvable → close 4404. Un kiosk_id
+    # absent reste autorisé (le client ne verra que les jackpots globaux).
+    if kiosk_id:
+        valid = await kiosk_validator.is_valid_kiosk_code(kiosk_id, redis_client)
+        if not valid:
+            await websocket.close(code=4404, reason="Invalid kiosk_id")
+            return
+
     await manager.connect(websocket, kiosk_id)
     try:
         while True:

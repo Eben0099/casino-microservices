@@ -138,6 +138,7 @@ services:
     environment:
       - REDIS_URL=redis://casino_redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://casino_admin:super_secret_password@postgres:5432/casino_roulette_db
+      - AGENT_SERVICE_URL=http://agent-service:8000
     volumes:
       - ./services/game-roulette-service:/app
     labels:

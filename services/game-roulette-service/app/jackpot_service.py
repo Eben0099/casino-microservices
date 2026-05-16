@@ -102,8 +102,10 @@ async def get_jackpots_for_kiosk(
 ) -> dict[str, int]:
     """Renvoie le dict complet (5 clés) pour ce kiosk.
 
-    Si `kiosk_id` est vide/None, les 3 clés per-kiosk valent 0 (fallback
-    documenté du spec). Les 2 clés globales sont toujours renseignées.
+    Lecture seule : aucun seed à la volée. Si la ligne n'existe pas en DB
+    pour ce `kiosk_id`, la clé reste à 0. Les 3 lignes bronze/silver/gold
+    sont seedées uniquement par `apply_round_settlement()` lorsqu'un
+    settlement réel arrive pour ce kiosk (ou via `admin_set_jackpots`).
     """
     out: dict[str, int] = {name: 0 for name in JACKPOT_NAMES}
 
@@ -116,24 +118,12 @@ async def get_jackpots_for_kiosk(
             if row.name in GLOBAL_JACKPOTS:
                 out[row.name] = int(row.value)
 
-        # Lecture per-kiosk si on a un id
+        # Lecture per-kiosk si on a un id (sans seed à la volée)
         if kiosk_id:
             result = await db.execute(
                 select(JackpotState).where(JackpotState.kiosk_id == kiosk_id)
             )
-            rows = result.scalars().all()
-            existing = {row.name for row in rows}
-            missing = KIOSK_JACKPOTS - existing
-            if missing:
-                # First-time seed
-                await _seed_kiosk_if_missing(db, kiosk_id)
-                await db.commit()
-                # Re-read after seed
-                result = await db.execute(
-                    select(JackpotState).where(JackpotState.kiosk_id == kiosk_id)
-                )
-                rows = result.scalars().all()
-            for row in rows:
+            for row in result.scalars().all():
                 if row.name in KIOSK_JACKPOTS:
                     out[row.name] = int(row.value)
                     await _cache_value(redis_client, row.kiosk_id, row.name, row.value)

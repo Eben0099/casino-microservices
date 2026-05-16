@@ -35,7 +35,9 @@ locals {
         { name = "ADMIN_DATABASE_URL", value = local.admin_db_url },
         { name = "REDIS_URL",          value = local.redis_url },
         { name = "ADMIN_API_KEY",      value = local.admin_api_key },
-        { name = "ROOT_PATH",          value = "/api/roulette" }
+        { name = "ROOT_PATH",          value = "/api/roulette" },
+        # Validation des kiosk_id sur /ws/roulette → appel /by-code/{code} sur agent-service via l'ALB.
+        { name = "AGENT_SERVICE_URL",  value = "http://${aws_lb.main.dns_name}/api/agents" }
       ]
     }
     "ticket-service" = {
