@@ -90,7 +90,9 @@ def random_bets(min_n: int = 1, max_n: int = 6) -> list[dict]:
 
 
 # --------------------------------------------------------------------------
-# Roulette state polling (Redis via docker exec — host port not exposed)
+# Roulette state polling
+#   - local: Redis via `docker exec` (host port not exposed)
+#   - prod:  REST GET /api/roulette/status (ECS, no docker access)
 # --------------------------------------------------------------------------
 
 def read_state(container: str = REDIS_CONTAINER) -> Optional[dict]:
@@ -105,18 +107,33 @@ def read_state(container: str = REDIS_CONTAINER) -> Optional[dict]:
         return None
 
 
-async def wait_for_betting(container: str, timeout_s: int = 90, min_window_s: float = 15.0) -> dict:
+async def read_state_rest(base: str) -> Optional[dict]:
+    try:
+        async with httpx.AsyncClient(base_url=base, timeout=3.0) as c:
+            r = await c.get("/api/roulette/status")
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        return None
+    return None
+
+
+async def wait_for_betting(
+    container: str,
+    timeout_s: int = 90,
+    min_window_s: float = 15.0,
+    base: Optional[str] = None,
+) -> dict:
     """Block until phase == Betting AND at least `min_window_s` seconds remain.
 
-    Without the min window guard, the simulator often catches Betting at second
-    28 of 30, fires its tickets, and most of them get rejected by the round
-    rotation. Waiting for a fresh Betting phase gives a comparable measurement
-    every time.
+    If `base` is given, polls via REST (`/api/roulette/status`) — works in prod
+    on ECS where the Redis port is not reachable from the host. Otherwise falls
+    back to `docker exec` on `container` (local docker-compose dev).
     """
     deadline = time.monotonic() + timeout_s
     last = None
     while time.monotonic() < deadline:
-        st = read_state(container)
+        st = (await read_state_rest(base)) if base else read_state(container)
         if st:
             phase = st.get("phase")
             if phase != last:
@@ -171,13 +188,25 @@ class RoundSummary:
     tickets: list[CreatedTicket] = field(default_factory=list)
 
 
-async def fetch_kiosks(base: str, pool_size_needed: int) -> list[str]:
+async def fetch_kiosks(base: str, pool_size_needed: int, prod: bool = False) -> list[str]:
+    """Build the kiosk pool.
+
+    - Default (dev): prefer "LoadTest*" agents created by load_test_tickets.py,
+      fall back to all agents.
+    - prod=True: explicitly EXCLUDE LoadTest kiosks — only real agents are used,
+      so the run doesn't pollute the back-office with fake LoadTest activity.
+    """
     headers = {"X-API-Key": ADMIN_KEY}
     async with httpx.AsyncClient(base_url=base, timeout=30.0) as c:
         r = await c.get("/api/agents/", headers=headers)
         r.raise_for_status()
-        loadtest = [a["id"] for a in r.json() if a.get("display_name", "").startswith("LoadTest")]
-        all_ids = [a["id"] for a in r.json()]
+        agents = r.json()
+    if prod:
+        real = [a["id"] for a in agents if not a.get("display_name", "").startswith("LoadTest")]
+        print(f"  [prod] using {len(real)} real kiosks (LoadTest agents excluded)")
+        return real
+    loadtest = [a["id"] for a in agents if a.get("display_name", "").startswith("LoadTest")]
+    all_ids = [a["id"] for a in agents]
     if len(loadtest) >= pool_size_needed:
         return loadtest
     print(f"  [warn] only {len(loadtest)} 'LoadTest' kiosks available; mixing with {len(all_ids) - len(loadtest)} other kiosks")
@@ -286,8 +315,9 @@ async def simulate_round(
     tickets_min: int,
     tickets_max: int,
     output_dir: Path,
+    rest_base: Optional[str] = None,
 ) -> RoundSummary:
-    state = await wait_for_betting(REDIS_CONTAINER)
+    state = await wait_for_betting(REDIS_CONTAINER, base=rest_base)
     round_id = state["round_id"]
     betting_remaining = betting_seconds_remaining(state)
 
@@ -347,7 +377,27 @@ def parse_args():
     p.add_argument("--tickets-per-kiosk-min", type=int, default=1)
     p.add_argument("--tickets-per-kiosk-max", type=int, default=5)
     p.add_argument("--output-dir", default=None, help="Directory for tickets.jsonl/rounds.jsonl (default: ./simulator-runs/<ts>)")
-    return p.parse_args()
+    p.add_argument(
+        "--prod",
+        action="store_true",
+        help=(
+            "Production mode: poll roulette state via REST /api/roulette/status "
+            "(no docker exec), and EXCLUDE LoadTest agents from the kiosk pool. "
+            "Defaults to low volume (3 rounds × 5 kiosks × 1 ticket) when nothing "
+            "else is specified."
+        ),
+    )
+    args = p.parse_args()
+    if args.prod:
+        # Override defaults to a low-volume observe-friendly run, unless the
+        # user explicitly passed higher numbers on the command line.
+        if args.kiosks_min == 50:
+            args.kiosks_min = 3
+        if args.kiosks_max == 200:
+            args.kiosks_max = 5
+        if args.tickets_per_kiosk_max == 5:
+            args.tickets_per_kiosk_max = 2
+    return args
 
 
 async def main():
@@ -362,10 +412,13 @@ async def main():
     print(f"  tickets    : {args.tickets_per_kiosk_min}–{args.tickets_per_kiosk_max} per kiosk")
     print(f"  output dir : {out}")
 
-    pool = await fetch_kiosks(args.base, args.kiosks_max)
+    pool = await fetch_kiosks(args.base, args.kiosks_max, prod=args.prod)
     print(f"  kiosk pool : {len(pool)} agents")
     if len(pool) < args.kiosks_min:
-        print(f"\nERROR: need at least {args.kiosks_min} kiosks. Run load_test_tickets.py first to seed the DB.")
+        if args.prod:
+            print(f"\nERROR: need at least {args.kiosks_min} real kiosks in the back-office.")
+        else:
+            print(f"\nERROR: need at least {args.kiosks_min} kiosks. Run load_test_tickets.py first to seed the DB.")
         sys.exit(1)
 
     limits = httpx.Limits(max_connections=args.kiosks_max * 4, max_keepalive_connections=args.kiosks_max)
@@ -378,6 +431,7 @@ async def main():
                 args.kiosks_min, args.kiosks_max,
                 args.tickets_per_kiosk_min, args.tickets_per_kiosk_max,
                 out,
+                rest_base=(args.base if args.prod else None),
             )
             totals["tickets"] += summary.succeeded
             totals["wager"] += sum(t.total_wager for t in summary.tickets)
