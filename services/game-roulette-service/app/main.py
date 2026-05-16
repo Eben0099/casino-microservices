@@ -471,12 +471,24 @@ async def websocket_endpoint(websocket: WebSocket):
     raw_kid = websocket.query_params.get("kiosk_id")
     kiosk_id = raw_kid.strip().upper() if isinstance(raw_kid, str) and raw_kid.strip() else None
 
-    # Si un kiosk_id est fourni, on le valide contre agent-service AVANT
-    # d'accepter la connexion. Code introuvable → close 4404. Un kiosk_id
-    # absent reste autorisé (le client ne verra que les jackpots globaux).
+    # Si un kiosk_id est fourni, on le valide contre agent-service.
+    # IMPORTANT : il faut accept() AVANT d'envoyer un close code applicatif
+    # (4404). Sinon Starlette transforme le close pré-accept en HTTP 403
+    # à l'upgrade, ce qui masque le vrai motif côté client.
+    # Un kiosk_id absent reste autorisé (le client ne verra que les
+    # jackpots globaux).
     if kiosk_id:
         valid = await kiosk_validator.is_valid_kiosk_code(kiosk_id, redis_client)
         if not valid:
+            await websocket.accept()
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "code": 4404,
+                    "reason": "Invalid kiosk_id",
+                })
+            except Exception:
+                pass
             await websocket.close(code=4404, reason="Invalid kiosk_id")
             return
 
