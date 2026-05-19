@@ -20,9 +20,12 @@ const USER_KEY = 'agent_user';
 function readUserIdFromJwt(token) {
   if (!token) return null;
   try {
-    const payload = JSON.parse(
-      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/') + '==='),
-    );
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    // Base64 requires a length multiple of 4. Compute exactly how many '='
+    // chars to append (0..3). Naively appending '===' breaks atob() when
+    // the natural length is already aligned.
+    const padding = '==='.slice((part.length + 3) % 4);
+    const payload = JSON.parse(atob(part + padding));
     return payload.userId || payload.user_id || payload.sub || null;
   } catch {
     return null;
@@ -63,6 +66,8 @@ export const AuthProvider = ({ children }) => {
   // Either path persists the token + user under the same localStorage
   // keys the rest of the app already uses, so downstream pages don't
   // need to know about embed at all.
+  // One-time bootstrap of the persisted session. Guarded by `bootstrapped`
+  // so React's StrictMode double-effect doesn't double-fetch.
   useEffect(() => {
     if (bootstrapped.current) return;
     bootstrapped.current = true;
@@ -95,7 +100,17 @@ export const AuthProvider = ({ children }) => {
       }
     }
     setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // PostMessage handshake with the parent webview (agd_terminal_web_app).
+  // NOTE: this effect MUST register the listener every time the component
+  // mounts. React StrictMode mounts effects twice in dev; if we tied the
+  // listener to the `bootstrapped` guard above, the StrictMode cleanup
+  // would tear down the listener and the second mount would skip past
+  // re-registering it (because bootstrapped.current is already true),
+  // leaving the iframe deaf to subsequent agd:auth messages.
+  useEffect(() => {
     if (!IS_EMBED) return;
 
     const handler = (event) => {

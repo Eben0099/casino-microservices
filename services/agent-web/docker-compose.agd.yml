@@ -1,0 +1,43 @@
+# =============================================================================
+# agent-web — AGD integrated mode (Phase 9)
+# =============================================================================
+# Boots the POS in `VITE_INTEGRATION_MODE=agd` and routes it through the
+# shared AGD Traefik gateway on /agents/pos/*.
+#
+# Prereq: the AGD stack must be up on the `agd_default` Docker network
+# (Traefik, agd-auth, agd-casino-service, agd-wallet-service, ...).
+#
+# Bring up :
+#   docker compose -f docker-compose.agd.yml up -d --build
+# Visit :
+#   http://localhost:8880/agents/pos/?embed=1&token=<JWT>
+#   http://localhost:8880/agents/pos/agd-terminal-simulator.html
+# =============================================================================
+
+services:
+  agent-web-agd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-web-agd:dev
+    container_name: agent-web-agd
+    restart: unless-stopped
+    environment:
+      - VITE_INTEGRATION_MODE=agd
+      - VITE_AGD_API_URL=/api/v1/agd_casino
+      - VITE_AGD_AUTH_URL=/api/v1/agd_auth
+      - VITE_AGD_WS_URL=/casino/ws
+      - VITE_AGD_GAME_CODE=ROULETTE_EU
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.agent-web-agd.rule=PathPrefix(`/agents/pos`)"
+      - "traefik.http.routers.agent-web-agd.entrypoints=web"
+      - "traefik.http.routers.agent-web-agd.priority=25"
+      - "traefik.http.services.agent-web-agd.loadbalancer.server.port=5173"
+    networks:
+      - agd-network
+
+networks:
+  agd-network:
+    name: agd_default
+    external: true
