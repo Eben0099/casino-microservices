@@ -4,6 +4,31 @@ Multi-game casino platform (European roulette in production, more games coming) 
 
 ---
 
+## Two deployment modes — both permanent, both production
+
+Since the AGD Techbet integration (Phase 5+ of the casino integration plan), this codebase ships in **two parallel modes that are kept in sync but never merged**:
+
+| Mode               | Game engine state      | POS                       | Wallet / Auth                          | Use case                                                                          |
+|--------------------|------------------------|---------------------------|----------------------------------------|-----------------------------------------------------------------------------------|
+| **standalone**     | `cyclic` (Unity loop)  | agent-web mode `standalone` against `ticket-service` | `agent-service` JWT + caisses          | Local kiosks: Unity table + cashier POS, no AGD platform.                          |
+| **integrated-agd** | `on_demand` (per-call) | agent-web mode `agd` against `agd-casino-service` | `agd-auth` JWT + `agd-wallet-service`  | AGD-integrated venues : POS embedded in `agd_terminal_web_app`, balance comes from the player's AGD wallet. |
+
+The **Python engine** (`game-roulette-service`) is **shared** — it exposes two surfaces depending on the `ENGINE_MODE` env var :
+
+- `WebSocket /ws/roulette` (cyclic, Unity) — unchanged behaviour.
+- `POST /internal/spins` (on_demand, called by `agd-casino-service`) — Phase 5 addition.
+
+The **agent-web** POS uses a build-time flag (`VITE_INTEGRATION_MODE=standalone|agd`) to pick its backend; same code, two builds.
+
+**Pick a mode :**
+
+- Run `docker compose up -d` (the default `docker-compose.yml`) for the historical product : Unity + agent POS + ticket-service + agent-service + backoffice + engine `cyclic`.
+- Run `docker compose -f docker-compose.integrated-agd.yml up -d` for the integrated product : engine `on_demand` only. The AGD platform must run in parallel — see `../AGD Techbet/agd-casino-service`.
+
+See **`docs/DEPLOYMENT_MODES.md`** for the operational guide (network topology, env per mode, scaling, runbook).
+
+---
+
 ## Table of contents
 
 1. [Architecture](#architecture)
