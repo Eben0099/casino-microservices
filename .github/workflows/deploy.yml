@@ -7,7 +7,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository }}   # e.g. <owner>/casino-microservices
 
 jobs:
   build-push:
@@ -30,6 +29,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # GHCR requires lowercase image paths; github.repository preserves
+      # the owner's case, so we lowercase it once here.
+      - name: Set lowercase image prefix
+        run: echo "IMAGE_PREFIX=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - uses: docker/setup-qemu-action@v3
 
