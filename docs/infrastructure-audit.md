@@ -241,3 +241,174 @@ Tarifs publics AWS `eu-west-3` au 2026-05-20, conditions à la demande (On-Deman
 - Performance applicative (cf. logs CloudWatch et code des microservices).
 - Coût des outils externes éventuels (DNS tiers, monitoring SaaS, CDN).
 - Coût Anthropic / OpenAI / autres API si utilisées par les services.
+
+---
+
+# Partie II — Plan de migration exécuté (Option C : EC2 + Docker Compose)
+
+**Date de la migration :** 2026-05-20
+**Statut :** infrastructure provisionnée, pipeline CI/CD en place, premier déploiement en cours de validation.
+
+## 10. Décisions stratégiques retenues
+
+| Décision | Choix | Pourquoi |
+|---|---|---|
+| Cible d'hébergement | **EC2 unique + Docker Compose** (Option C) | -85 à -90 % de coût, zéro changement de code applicatif |
+| Compte AWS | **Nouveau compte dédié** (`264787847039`) | Profite du nouveau Free Tier (juillet 2025), isole l'historique |
+| Plan AWS | **Free Plan** (provisoire) | Paid Plan recommandé (mêmes crédits, pas d'auto-close à M+6) — à upgrader |
+| Région | `eu-west-3` (Paris) | Inchangé, latence locale |
+| Instance EC2 | `t4g.small` ARM Graviton2, 2 GB RAM | Gratuit via **T4g Free Trial** jusqu'au 31 décembre 2026 |
+| DB | RDS `db.t3.micro` Postgres 15, single-AZ | Couverte par les 200 $ de crédits Free Tier ~6-7 mois |
+| Cache | Redis 7 en **conteneur** sur l'EC2 | ElastiCache hors Free Tier → 15 $/mois économisés |
+| Registre d'images | **GHCR** (GitHub Container Registry) | Free Tier ECR plafonné à 500 MB → insuffisant. GHCR gratuit pour 500 MB privé puis $0.25/GB/mois |
+| Auth CI → AWS | **Access Keys IAM** | OIDC plus sécurisé mais surdimensionné à ce stade — à migrer plus tard |
+| Secrets Terraform | `terraform.tfvars` local **gitignored** | Pas de Secrets Manager (0.40 $/secret/mois inutile). SSM Parameter Store envisagé en v2 |
+| TLS / HTTPS | **HTTP only** pour l'instant | sslip.io + Let's Encrypt prêts à activer le jour où un domaine est acheté |
+
+## 11. Projection de coût après migration
+
+| Période | Coût mensuel | Couverture |
+|---|---|---|
+| 2026-05 → 2026-11 (~6-7 mois) | **0 $** | 200 $ de crédits + T4g Free Trial |
+| 2026-12 → 2027-08 (~9 mois) | **~3-5 $** | T4g expire (passage à $12/mois) mais RDS encore Free Tier |
+| 2027-09+ | **~25 $ managé** ou **~11 $ Postgres conteneurisé** | Tout On-Demand |
+
+Comparé à ~118 $/mois sur l'archi ECS initiale : **-100 % pendant 7 mois, puis -77 à -90 %** ensuite.
+
+## 12. Inventaire de la nouvelle infrastructure
+
+### 12.1 Ressources AWS provisionnées (dossier `infrastructure-ec2/`)
+
+| Type | Identifiant | Détails |
+|---|---|---|
+| VPC | `casino-vpc` | `10.0.0.0/16` |
+| Subnet public | `casino-public` | `10.0.1.0/24`, `eu-west-3a` |
+| Subnets privés (RDS) | `casino-private-a` / `casino-private-b` | exigence DB subnet group multi-AZ |
+| Internet Gateway | `casino-igw` | accès sortant pour l'EC2 |
+| EC2 | `casino-app` (`i-07a311d10083523e1`) | `t4g.small`, Ubuntu 22.04 ARM64, EBS gp3 30 GB chiffré |
+| Elastic IP | `13.36.124.253` | persistante, gratuite tant qu'attachée |
+| RDS | `casino-db.cz2q6i64ittm.eu-west-3.rds.amazonaws.com` | Postgres 15, `db.t3.micro`, 20 GB chiffré, single-AZ |
+| Security Groups | `casino-ec2-sg`, `casino-rds-sg` | 80/443 public, 22 admin-only, 5432 EC2→RDS uniquement |
+| IAM user | `casino-github-actions` | policy minimale (sts, ec2:Describe*, logs read, S3 `casino-*`) |
+| AWS Budget | `casino-monthly-cost` | seuils 50/80/100 % avec alertes mail |
+
+### 12.2 Fichiers Terraform créés
+
+```
+infrastructure-ec2/
+├── provider.tf            # AWS provider eu-west-3 + tags par défaut
+├── variables.tf           # variables typées, secrets marqués sensitive
+├── network.tf             # VPC + subnets + IGW + route tables
+├── security.tf            # SG EC2 + SG RDS
+├── ec2.tf                 # AMI Ubuntu ARM64, instance, EBS, EIP
+├── user-data.sh           # bootstrap Docker + dossier /opt/casino
+├── rds.tf                 # Postgres 15, single-AZ, chiffré
+├── budgets.tf             # budget mensuel + alertes email
+├── github-iam.tf          # IAM user + access keys pour GHA
+├── outputs.tf             # IP, endpoint RDS, sslip hostname, checklist
+├── terraform.tfvars.example  # template public
+└── .gitignore             # exclut tfstate, tfvars, *.bak
+```
+
+### 12.3 Fichiers applicatifs créés ou modifiés
+
+- `docker-compose.prod.yml` — compose dédié production : pas de Postgres local, images GHCR, lecture `.env`, plus de `--reload`, plus de volumes de code, restart `unless-stopped`. Le `docker-compose.yml` dev reste inchangé.
+- `.github/workflows/deploy.yml` — réécrit. Build matrix ARM64 sur 5 services via QEMU + push GHCR, puis deploy SSH sur EC2 (`docker compose pull && up -d`).
+- `docs/infrastructure-audit.md` — ce document (Partie I = audit initial, Partie II = recap migration).
+
+## 13. Configuration runtime sur l'EC2
+
+| Élément | Valeur / contenu |
+|---|---|
+| Hôte | Ubuntu 22.04 LTS ARM64 |
+| User | `ubuntu` (membre du groupe `docker`) |
+| Docker | v29.5.1, installé via `get.docker.com` |
+| Docker Compose | plugin v5.1.3 |
+| Workdir | `/opt/casino/` (owner `ubuntu`) |
+| Fichiers | `docker-compose.prod.yml` + `.env` (jamais commité) |
+| Variables `.env` | `GHCR_OWNER`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `JWT_SECRET`, `ADMIN_API_KEY` |
+
+## 14. Pipeline CI/CD
+
+### 14.1 Déclencheurs
+- Push sur `main`
+- Déclenchement manuel via `workflow_dispatch`
+
+### 14.2 Jobs
+- **`build-push`** (matrix sur les 5 services) : checkout → lowercase `IMAGE_PREFIX` (GHCR exige minuscule strict) → setup QEMU + buildx → login GHCR → build ARM64 + push avec cache GHA → tags `:latest` et `:${{ github.sha }}`.
+- **`deploy`** (séquentiel, après build) : auth AWS via Access Keys → `aws sts get-caller-identity` (sanity) → SSH dans l'EC2 → `docker login ghcr.io` → `docker compose -f docker-compose.prod.yml pull && up -d` → `docker image prune -f`.
+
+### 14.3 Secrets GitHub (6 secrets)
+
+| Nom | Source |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | output Terraform `github_actions_access_key_id` |
+| `AWS_SECRET_ACCESS_KEY` | output Terraform `github_actions_secret_access_key` |
+| `AWS_REGION` | constante `eu-west-3` |
+| `EC2_HOST` | EIP `13.36.124.253` |
+| `EC2_SSH_KEY` | contenu du `casino-keypair.pem` |
+| `GHCR_PULL_TOKEN` | Personal Access Token GitHub (`read:packages`, expire 1 an) |
+
+## 15. Incidents traversés pendant la migration (lessons learned)
+
+| # | Symptôme | Cause | Fix appliqué |
+|---|---|---|---|
+| 1 | `terraform apply` demande les secrets en interactif | `terraform.tfvars` absent | Création locale avec `openssl rand` + ajout à `.gitignore` |
+| 2 | `No valid credential sources found` | Profil `casino` configuré avec un champ non standard (`login_session`) puis `aws_secret_access_key` sans `aws_access_key_id` | Wipe `~/.aws/{config,credentials}` puis `aws configure --profile casino` propre |
+| 3 | **Secrets AWS leakés deux fois dans des messages de debug** | Diagnostic verbeux pendant le troubleshooting | Désactivation immédiate des access keys dans IAM + régénération |
+| 4 | `creating EC2 Instance ... InvalidKeyPair.NotFound` | Key pair `casino-keypair` jamais créée dans la console | Création manuelle dans EC2 → Key Pairs |
+| 5 | `FreeTierRestrictionError: backup retention period exceeds maximum` | Compte sur Free Plan limite la rétention RDS | `backup_retention_period = 0` (à remonter à 7 dès passage en Paid Plan) |
+| 6 | `MasterUserPassword is not a valid password. Only printable ASCII besides '/', '@', '"', ' '` | `openssl rand -base64` produit des `/` interdits par RDS | Regénération avec `openssl rand -hex 24` |
+| 7 | `ingress.X.description doesn't comply with restrictions` | Tirets cadratin Unicode `—` dans les descriptions de SG | Remplacement par `-` ASCII |
+| 8 | `user-data` cloud-init en `error` | Mirror `ports.ubuntu.com` en *Mirror sync in progress* (`File has unexpected size`) | Switch sur le mirror régional AWS `eu-west-3a.clouds.ports.ubuntu.com` + install Docker via `get.docker.com` |
+| 9 | `.env` sur l'EC2 sans valeurs (3 secrets vides) | Lignes du `terraform.tfvars` avec 2 espaces de début (copy-paste markdown) → `grep '^pg_password'` ne matchait pas | `sed -i 's/^[ \t]*//'` sur le tfvars + re-extraction + regénération via Python (sans shell quoting) |
+| 10 | `terraform.tfvars.bak` (contenant les secrets) sur le point d'être commité | `sed -i.bak` crée un backup avec un suffixe que `.gitignore` ne couvrait pas | `git restore --staged` + `rm` + ajout `*.bak` au `.gitignore` |
+| 11 | `failed to build: invalid tag ghcr.io/Eben0099/... must be lowercase` | `github.repository` préserve la casse du owner ; GHCR exige minuscule strict | Step bash en début de job : `echo "IMAGE_PREFIX=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV` |
+| 12 | Job `deploy` en `dial tcp ***:22: i/o timeout` | Security group SSH restreint à l'IP perso ; GHA tourne sur d'autres IPs | `admin_cidr = "0.0.0.0/0"` dans tfvars (acceptable car SSH key-only). Migration future vers SSM `send-command`. |
+| 13 | Toutes les routes renvoient 404 alors que tous les containers sont `Up` | Traefik (v2.10, v3.1, v3.4) bundle un client Docker qui négocie API 1.24 ; Docker Engine 29+ refuse les requêtes < API 1.40 sur **tous** les endpoints (y compris `/_ping`), bloquant la négociation. La var `DOCKER_API_VERSION` n'est pas honorée par Traefik. | Bascule du **provider Docker → provider file** : routes définies dans `traefik/dynamic-prod.yml`, plus aucun appel API Docker. Workflow mis à jour pour scp le fichier de routes. |
+
+## 16. Sécurité — état après migration
+
+| Item | Statut | Commentaire |
+|---|---|---|
+| Secrets sortis du code Terraform | ✅ | tous via variables `sensitive` + `terraform.tfvars` gitignored |
+| Rotation des secrets de l'ancienne archi | ✅ (implicite) | l'ancien compte AWS est destiné à être détruit → secrets historiques deviennent caducs |
+| `terraform.tfstate` gitignored | ✅ | + à migrer sur backend S3 + DynamoDB lock |
+| HTTPS / TLS | ❌ | HTTP-only volontaire au stade actuel — `sslip.io` + Let's Encrypt prêts à activer |
+| EBS chiffré | ✅ | root volume chiffré |
+| RDS chiffré | ✅ | `storage_encrypted = true` |
+| RDS publiquement accessible | ❌ (correct) | reachable uniquement depuis le SG EC2 |
+| SSH restreint | ⚠️ | `admin_cidr` configurable, à mettre à `<ton-IP>/32` si encore à `0.0.0.0/0` |
+| Sauvegardes RDS automatiques | ❌ | `backup_retention_period = 0` (limite Free Plan) — à activer après upgrade Paid Plan |
+| MFA sur l'utilisateur `casino-admin` | ⚠️ à vérifier | recommandé pour tout user IAM avec console access |
+
+## 17. Étapes restantes (TODO)
+
+### Court terme (cette semaine)
+- [ ] **Upgrade le compte AWS de Free Plan → Paid Plan** (Billing → Account). Mêmes 200 $ de crédits, pas de fermeture auto à M+6.
+- [ ] Une fois Paid Plan : remonter `backup_retention_period` à `7` dans `rds.tf` et appliquer.
+- [ ] Vérifier la valeur de `admin_cidr` dans `terraform.tfvars` (doit être ton IP/32, pas `0.0.0.0/0`).
+- [ ] Confirmer que les 5 jobs `build-push` passent au vert et que le job `deploy` exécute le compose proprement.
+- [ ] Smoke tests : `curl http://13.36.124.253/`, `curl /api/agents/status`, `curl /api/tickets/status`, `curl /api/roulette/status`.
+
+### Moyen terme (ce mois)
+- [ ] Migrer `terraform.tfstate` sur un backend S3 + DynamoDB (lock).
+- [ ] Acheter un nom de domaine (~10 $/an) puis activer HTTPS via Traefik + Let's Encrypt (le `sslip.io` est utilisable en attendant pour tester).
+- [ ] Mettre en place `pg_dump | gzip | aws s3 cp` quotidien (cron sur l'EC2 ou Lambda + EventBridge) avec lifecycle policy Glacier à 7 jours.
+- [ ] Activer MFA sur `casino-admin` dans la console IAM.
+- [ ] Faire les 4 autres activités du Free Tier bonus (EC2 ✅ déjà fait, RDS ✅ déjà fait, Budget ✅ déjà fait, **manquantes : Lambda hello-world, appel Bedrock**) → +40 $ de crédits.
+
+### Long terme (avant la fin du Free Tier)
+- [ ] Mettre une alarme calendrier au **15 novembre 2026** : décision T4g (rester / migrer / réduire) avant la falaise du 31 décembre 2026.
+- [ ] Migrer vers OIDC pour l'auth GHA → AWS (suppression des access keys long-lived).
+- [ ] Avant août 2027 (fin du Free Tier RDS) : décider entre upgrade payant ou conteneurisation de Postgres sur l'EC2 + EBS dédié.
+- [ ] Réintroduire les services managés (RDS multi-AZ, ALB, ECS) **uniquement quand le produit a des utilisateurs réels et un revenu** — pas avant.
+
+## 18. Comment partager cet audit
+
+Ce document est conçu pour être lu de bout en bout par :
+- un développeur qui rejoint le projet (vue d'ensemble historique + état actuel),
+- un consultant cloud qui doit auditer la facture ou la sécurité,
+- un futur toi qui revient sur le projet après plusieurs mois.
+
+Garde-le à jour à chaque migration ou décision structurelle. La **Partie I** est l'audit initial figé (référence historique). La **Partie II** doit évoluer.

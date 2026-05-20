@@ -1,0 +1,62 @@
+# Traefik static-file routing for the production stack.
+# Used instead of the Docker provider because Traefik's bundled Docker client
+# negotiates API 1.24, which Docker Engine 29+ on the EC2 rejects (min 1.40).
+# Services are reached via Compose service DNS on the casino_network bridge.
+
+http:
+  routers:
+    agent:
+      rule: "PathPrefix(`/api/agents`)"
+      service: agent
+      entryPoints: [web]
+      priority: 100
+
+    ticket:
+      rule: "PathPrefix(`/api/tickets`)"
+      service: ticket
+      entryPoints: [web]
+      priority: 100
+
+    roulette:
+      rule: "PathPrefix(`/api/roulette`) || PathPrefix(`/ws/roulette`)"
+      service: roulette
+      entryPoints: [web]
+      priority: 100
+
+    agent-web:
+      rule: "PathPrefix(`/agents/pos`)"
+      service: agent-web
+      entryPoints: [web]
+      priority: 10
+
+    backoffice:
+      rule: "PathPrefix(`/`)"
+      service: backoffice
+      entryPoints: [web]
+      priority: 1
+
+  services:
+    agent:
+      loadBalancer:
+        servers:
+          - url: "http://agent-service:8000"
+
+    ticket:
+      loadBalancer:
+        servers:
+          - url: "http://ticket-service:8000"
+
+    roulette:
+      loadBalancer:
+        servers:
+          - url: "http://game-roulette-service:8000"
+
+    agent-web:
+      loadBalancer:
+        servers:
+          - url: "http://agent-web:5173"
+
+    backoffice:
+      loadBalancer:
+        servers:
+          - url: "http://backoffice-web:5173"

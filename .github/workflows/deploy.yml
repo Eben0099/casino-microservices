@@ -74,6 +74,17 @@ jobs:
       - name: Verify AWS auth
         run: aws sts get-caller-identity
 
+      - uses: actions/checkout@v4
+
+      - name: Sync compose + Traefik config to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "docker-compose.prod.yml,traefik/dynamic-prod.yml"
+          target: /opt/casino/
+
       - name: Pull + restart Docker Compose on EC2
         uses: appleboy/ssh-action@v1.0.3
         env:
