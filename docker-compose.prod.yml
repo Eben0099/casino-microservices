@@ -1,0 +1,138 @@
+# Production compose for the EC2 + RDS stack.
+#
+# Differences from docker-compose.yml (dev):
+#   - No local postgres service (uses managed RDS)
+#   - No code volume mounts and no --reload (immutable containers)
+#   - Images pulled from GHCR (built by .github/workflows/deploy.yml)
+#   - Secrets and connection strings read from .env (gitignored)
+#
+# .env required on the host (/opt/casino/.env):
+#   GHCR_OWNER         # GitHub username/org that owns the images, lowercase
+#   POSTGRES_HOST      # RDS endpoint, from `terraform output rds_endpoint`
+#   POSTGRES_PORT      # 5432
+#   POSTGRES_USER      # postgres
+#   POSTGRES_PASSWORD  # value of pg_password in terraform.tfvars
+#   JWT_SECRET         # value of jwt_secret in terraform.tfvars
+#   ADMIN_API_KEY      # value of admin_api_key in terraform.tfvars
+
+x-pg-admin-url: &pg_admin_url
+  postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+
+services:
+  traefik:
+    image: traefik:v2.10
+    container_name: casino_gateway
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - casino_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: casino_redis
+    restart: unless-stopped
+    networks:
+      - casino_network
+
+  agent-service:
+    image: ghcr.io/${GHCR_OWNER}/casino-microservices/agent-service:latest
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    networks:
+      - casino_network
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/casino_agent_db
+      - ADMIN_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - ROOT_PATH=/api/agents
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.agent.entrypoints=web"
+      - "traefik.http.routers.agent.rule=PathPrefix(`/api/agents`)"
+      - "traefik.http.services.agent.loadbalancer.server.port=8000"
+      - "traefik.http.routers.agent.priority=100"
+
+  ticket-service:
+    image: ghcr.io/${GHCR_OWNER}/casino-microservices/ticket-service:latest
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      - redis
+    networks:
+      - casino_network
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/casino_ticket_db
+      - ADMIN_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      - REDIS_URL=redis://casino_redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - ROOT_PATH=/api/tickets
+      - AGENT_SERVICE_URL=http://agent-service:8000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ticket.entrypoints=web"
+      - "traefik.http.routers.ticket.rule=PathPrefix(`/api/tickets`)"
+      - "traefik.http.services.ticket.loadbalancer.server.port=8000"
+      - "traefik.http.routers.ticket.priority=100"
+
+  game-roulette-service:
+    image: ghcr.io/${GHCR_OWNER}/casino-microservices/game-roulette-service:latest
+    container_name: casino_roulette_engine
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      - redis
+    networks:
+      - casino_network
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/casino_roulette_db
+      - ADMIN_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      - REDIS_URL=redis://casino_redis:6379/0
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - ROOT_PATH=/api/roulette
+      - AGENT_SERVICE_URL=http://agent-service:8000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.roulette.entrypoints=web"
+      - "traefik.http.routers.roulette.rule=PathPrefix(`/api/roulette`) || PathPrefix(`/ws/roulette`)"
+      - "traefik.http.services.roulette.loadbalancer.server.port=8000"
+      - "traefik.http.routers.roulette.priority=100"
+
+  backoffice-web:
+    image: ghcr.io/${GHCR_OWNER}/casino-microservices/backoffice:latest
+    container_name: casino_backoffice
+    restart: unless-stopped
+    networks:
+      - casino_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backoffice.entrypoints=web"
+      - "traefik.http.routers.backoffice.rule=PathPrefix(`/`)"
+      - "traefik.http.services.backoffice.loadbalancer.server.port=5173"
+      - "traefik.http.routers.backoffice.priority=1"
+
+  agent-web:
+    image: ghcr.io/${GHCR_OWNER}/casino-microservices/agent-web:latest
+    container_name: casino_agent_web
+    restart: unless-stopped
+    networks:
+      - casino_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.agent-web.entrypoints=web"
+      - "traefik.http.routers.agent-web.rule=PathPrefix(`/agents/pos`)"
+      - "traefik.http.services.agent-web.loadbalancer.server.port=5173"
+      - "traefik.http.routers.agent-web.priority=10"
+
+networks:
+  casino_network:
+    driver: bridge

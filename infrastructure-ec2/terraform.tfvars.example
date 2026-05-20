@@ -1,0 +1,28 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# terraform.tfvars is gitignored and MUST NEVER be committed.
+#
+# Generate fresh random secrets with:
+#   openssl rand -base64 32     # for pg_password and admin_api_key
+#   openssl rand -base64 48     # for jwt_secret
+#
+# Do not reuse any value from the old project's Git history.
+
+aws_region   = "eu-west-3"
+project_name = "casino"
+environment  = "dev"
+
+# Your public IP, /32. Get it with: curl ifconfig.me
+admin_cidr = "1.2.3.4/32"
+
+# EC2 Key Pair name (create it in AWS console first: EC2 → Key Pairs → Create).
+# The .pem file stays on your laptop.
+ssh_key_name = "casino-keypair"
+
+# Secrets — never commit these.
+pg_password   = "REPLACE_ME_WITH_openssl_rand_base64_32"
+jwt_secret    = "REPLACE_ME_WITH_openssl_rand_base64_48"
+admin_api_key = "REPLACE_ME_WITH_openssl_rand_base64_32"
+
+# Budget alert (one of the 5 Free Tier bonus activities → $20 credit).
+budget_alert_email = "you@example.com"
+monthly_budget_usd = "30"

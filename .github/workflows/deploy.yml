@@ -1,71 +1,99 @@
-name: Déploiement Casino Microservices
+name: Build and deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
 env:
-  AWS_REGION: "eu-west-3"
-  ECR_REGISTRY: "253571482846.dkr.ecr.eu-west-3.amazonaws.com"
-  CLUSTER_NAME: "casino-cluster"
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}   # e.g. <owner>/casino-microservices
 
 jobs:
-  build-and-deploy:
-    name: 🚀 Build et Déploiement
+  build-push:
+    name: Build & push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - agent-service
+          - game-roulette-service
+          - ticket-service
+          - backoffice
+          - agent-web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/${{ matrix.service }}
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-push
     runs-on: ubuntu-latest
 
     steps:
-    - name: 📥 Récupération du code
-      uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: 🔐 Connexion à AWS
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Verify AWS auth
+        run: aws sts get-caller-identity
 
-    - name: 🐳 Connexion à Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Pull + restart Docker Compose on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          IMAGE_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN,IMAGE_SHA
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/casino
 
-    - name: 🏗️ Setup Docker Buildx (pour build ARM64)
-      uses: docker/setup-buildx-action@v3
+            # Authenticate the EC2 to GHCR (idempotent).
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
-    - name: 📋 Installation de QEMU (pour l'émulation ARM64)
-      uses: docker/setup-qemu-action@v3
+            # Pull every image tag referenced by the prod compose file.
+            docker compose -f docker-compose.prod.yml pull
 
-    - name: 🛠️ Build, Tag, et Push des images (ARM64)
-      run: |
-        # Liste des services à traiter
-        services=("agent-service" "game-roulette-service" "ticket-service")
+            # Recreate only the services whose images changed.
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-        for service in "${services[@]}"; do
-          echo "🏁 Traitement du service : $service"
-          
-          # Correction du nom du dépôt
-          repo_name="casino-$service"
-          
-          docker buildx build --platform linux/arm64 \
-            -t ${{ env.ECR_REGISTRY }}/$repo_name:latest \
-            ./services/$service --push
-            
-          aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service $repo_name-service --force-new-deployment
-        done
-
-        # --- DÉPLOIEMENT DU BACKOFFICE ---
-        echo "🌐 Traitement du service : backoffice"
-        docker buildx build --platform linux/arm64 \
-          -t ${{ env.ECR_REGISTRY }}/casino-backoffice-web:latest \
-          ./services/backoffice --push
-
-        aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service casino-web-service --force-new-deployment
-
-        # --- DÉPLOIEMENT DU FRONT AGENT (POS) ---
-        echo "🛒 Traitement du service : agent-web"
-        docker buildx build --platform linux/arm64 \
-          -t ${{ env.ECR_REGISTRY }}/casino-agent-web:latest \
-          ./services/agent-web --push
-
-        aws ecs update-service --cluster ${{ env.CLUSTER_NAME }} --service casino-agent-web-service --force-new-deployment
+            # Free space taken by old image layers.
+            docker image prune -f

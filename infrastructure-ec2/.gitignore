@@ -1,0 +1,23 @@
+# Terraform state — contains secrets. Use a remote backend (S3) in real projects.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Local working dirs and lock files
+.terraform/
+.terraform.lock.hcl
+
+# Secrets — only the example is committed.
+terraform.tfvars
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Backup files from sed -i.bak (may contain secrets)
+*.bak
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Plan files
+*.tfplan
