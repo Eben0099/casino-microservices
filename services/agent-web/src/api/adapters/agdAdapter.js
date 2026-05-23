@@ -54,34 +54,136 @@ function peel(resp) {
 }
 
 function shortenUuid(uuid) {
-  return uuid ? `${uuid.slice(0, 8)}` : null;
+  return uuid ? `${uuid.slice(0, 8).toUpperCase()}` : null;
 }
 
+/**
+ * Normalise a CasinoTicket (post-cyclic refactor) into the snake_case
+ * shape consumed by TicketReceipt / Ventes. Tickets can be PENDING (no
+ * winning_number yet) and bets flip to WON/LOST after settlement.
+ *
+ * Status mapping:
+ *   - "PENDING"  → "PENDING"   (en attente du tirage)
+ *   - "WON"      → "WON"
+ *   - "LOST"     → "LOST"
+ *   - "PAID"     → "PAID"
+ *   - "CANCELLED"/ "VOIDED" → "VOIDED"
+ */
+function normalizeTicket(t) {
+  if (!t) return null;
+  const status = mapTicketStatus(t.status);
+  const bets = (t.bets ?? []).map((b) => {
+    const payout = Number(b.payout ?? 0);
+    const isWinning = !!b.isWinning || b.result === "WON" || payout > 0;
+    return {
+      bet_type: b.betType,
+      bet_target: b.betTarget,
+      amount: Number(b.amount ?? 0),
+      payout,
+      is_winning: isWinning,
+      result: b.result ?? (payout > 0 ? "won" : "lost"),
+    };
+  });
+  const winningRaw = t.winningNumber ?? null;
+  const winningNumber =
+    winningRaw == null || winningRaw === "" ? null : Number(winningRaw);
+  return {
+    short_code: t.shortCode || shortenUuid(t.id),
+    id: t.id,
+    round_id: t.roundId,
+    status,
+    created_at: t.placedAt ?? null,
+    settled_at: t.settledAt ?? null,
+    winning_number: winningNumber,
+    total_wager: Number(t.totalWager ?? 0),
+    total_payout: Number(t.totalPayout ?? 0),
+    bets,
+    mode: ADAPTER_MODES.AGD,
+    raw: t,
+  };
+}
+
+function mapTicketStatus(raw) {
+  switch (raw) {
+    case "PENDING":
+      return "PENDING";
+    case "WON":
+      return "WON";
+    case "LOST":
+      return "LOST";
+    case "PAID":
+      return "PAID";
+    case "CANCELLED":
+    case "VOIDED":
+      return "VOIDED";
+    default:
+      return "PENDING";
+  }
+}
+
+/**
+ * Map a casino-service GameRound payload into the legacy "Python ticket"
+ * shape that all of agent-web's UI consumes (TicketReceipt, Ventes table,
+ * etc.). Keep this strictly snake_case so the existing components don't need
+ * conditional accessors.
+ *
+ * Notable AGD → Python field mappings:
+ *   id (uuid)          -> short_code (first 8 hex, uppercased) + round_id
+ *   placedAt           -> created_at
+ *   status:'settled'   -> 'WON' (if totalPayout > 0) or 'LOST'
+ *   status:'pending'   -> 'PENDING'
+ *   status:'voided'    -> 'VOIDED'
+ *   winningOutcome     -> winning_number (cast to Number when possible)
+ *   totalStake         -> total_wager
+ *   totalPayout        -> total_payout (same)
+ *   bets[].betType     -> bets[].bet_type
+ *   bets[].betTarget   -> bets[].bet_target
+ *   bets[].result      -> bets[].is_winning (true on 'won')
+ */
 function normalizeSpin(spin) {
   if (!spin) return null;
-  const status =
-    spin.status === "settled"
-      ? "settled"
-      : spin.status === "voided"
-        ? "voided"
-        : "pending";
+
+  const rawStatus = spin.status;
+  let status;
+  if (rawStatus === "voided") status = "VOIDED";
+  else if (rawStatus === "settled") status = (spin.totalPayout ?? 0) > 0 ? "WON" : "LOST";
+  else status = "PENDING";
+
+  const winningRaw = spin.winningOutcome ?? null;
+  const winningNumber =
+    winningRaw == null || winningRaw === "" ? null : Number(winningRaw);
+
+  const bets = (spin.bets ?? []).map((b) => {
+    const result = b.result ?? ((b.payout ?? 0) > 0 ? "won" : "lost");
+    return {
+      bet_type: b.betType,
+      bet_target: b.betTarget,
+      amount: Number(b.amount ?? 0),
+      payout: Number(b.payout ?? 0),
+      is_winning: result === "won",
+      result,
+    };
+  });
+
+  // totalPayout from the server already aggregates bet payouts AND jackpot
+  // wins (when the current player is the jackpot winner). So WON/LOST is
+  // strictly a function of totalPayout — the bets-only sum is exposed
+  // separately as bets_payout for break-down rendering.
+  const jackpot = spin.jackpot ?? null;
+
   return {
-    code: shortenUuid(spin.id) || spin.id,
+    short_code: shortenUuid(spin.id),
     id: spin.id,
-    placedAt: spin.placedAt || null,
-    settledAt: spin.settledAt || null,
+    round_id: spin.externalRoundId || spin.id,
     status,
-    totalWager: spin.totalStake ?? 0,
-    totalPayout: spin.totalPayout ?? 0,
-    winningNumber: spin.winningOutcome ?? null,
-    bets:
-      spin.bets?.map((b) => ({
-        bet_type: b.betType,
-        bet_target: b.betTarget,
-        amount: b.amount,
-        payout: b.payout ?? 0,
-        result: b.result ?? (b.payout > 0 ? "won" : "lost"),
-      })) ?? [],
+    created_at: spin.placedAt ?? null,
+    settled_at: spin.settledAt ?? null,
+    winning_number: winningNumber,
+    total_wager: Number(spin.totalStake ?? 0),
+    total_payout: Number(spin.totalPayout ?? 0),
+    bets_payout: Number(spin.betsPayout ?? 0),
+    jackpot,
+    bets,
     mode: ADAPTER_MODES.AGD,
     raw: spin,
   };
@@ -138,10 +240,14 @@ export function createAgdAdapter() {
     async getBalance() {
       try {
         const resp = await casino.get("/diagnostics/wallet-self");
-        const w = peel(resp) ?? {};
+        // Endpoint shape: { success, data: { found, wallet: { balance, currency: {code}, ... } }, meta }
+        const data = peel(resp) ?? {};
+        const w = data.wallet ?? data ?? {};
+        const currencyCode =
+          w.currency?.code ?? w.currencyCode ?? w.currency ?? "XAF";
         return {
           balance: Number(w.balance ?? 0),
-          currency: w.currencyCode ?? w.currency ?? "XAF",
+          currency: currencyCode,
           kiosk_code: w.kioskCode ?? null,
           kiosk_name: w.kioskName ?? null,
         };
@@ -158,26 +264,41 @@ export function createAgdAdapter() {
       return { sessionId: cached, kioskCode: null };
     },
 
-    async placeTicket({ bets, replayRounds = 1, gameCode }) {
-      // AGD's session does one spin per call; replayRounds collapses to 1.
+    async placeTicket({ bets, replayRounds = 1, gameCode, roundId }) {
+      // The cyclic engine settles one round at a time — replay > 1 is a
+      // standalone-only concept where the agent buys N future rounds at
+      // once. In AGD we resolve to a single ticket per call (the cashier
+      // can immediately place another ticket on the next Betting phase).
       if (replayRounds > 1 && import.meta.env.DEV) {
-        console.info("[agd] replayRounds>1 ignored (AGD does one spin per call)");
+        console.info("[agd] replayRounds>1 ignored (cyclic engine, one ticket per round)");
       }
       const ctx = await this.getPlayContext();
       let sessionId = ctx.sessionId;
       if (!sessionId) sessionId = await getOrOpenSession(null);
 
+      // round_id is required by the server's anti-décalage check: if the
+      // cashier clicked "Valider" just as the phase rolled to BetsClosing,
+      // the server rejects with ROUND_MISMATCH and the UI can re-prompt.
+      if (!roundId) {
+        throw new Error(
+          "Round id missing — cycle ticker probably still initialising. Wait one second and retry.",
+        );
+      }
+
       const body = {
+        session_id: sessionId,
+        round_id: roundId,
+        game_code: gameCode || "ROULETTE_EU",
         bets: bets.map((b) => ({
-          betType: b.bet_type,
-          betTarget: b.bet_target,
+          bet_type: b.bet_type,
+          bet_target: b.bet_target,
           amount: b.amount,
         })),
       };
-      const resp = await casino.post(`/sessions/${sessionId}/spins`, body);
-      const spin = peel(resp);
-      // AGD returns a synchronously-settled spin (engine is on_demand)
-      return normalizeSpin(spin);
+
+      const resp = await casino.post(`/tickets`, body);
+      const ticket = peel(resp);
+      return normalizeTicket(ticket);
     },
 
     async getRecent({ minutes = 15, limit = 100 } = {}) {
@@ -194,20 +315,17 @@ export function createAgdAdapter() {
     },
 
     async getTicket(idOrCode) {
-      // agent-web sometimes passes a shortened code; agd needs the UUID
-      try {
-        const resp = await casino.get(`/admin/spins/${idOrCode}`);
-        return normalizeSpin(peel(resp));
-      } catch {
-        // fall back to public /spins/:id (no admin perms)
-        const resp = await casino.get(`/spins/${idOrCode}`);
-        return normalizeSpin(peel(resp));
-      }
+      // /tickets/:codeOrId accepts both the short_code (TK-…) and the UUID.
+      const resp = await casino.get(`/tickets/${idOrCode}`);
+      return normalizeTicket(peel(resp));
     },
 
     async payout(idOrCode) {
-      // AGD settles + credits at spin time; payout is a no-op fetch.
-      return this.getTicket(idOrCode);
+      // Transition WON → PAID server-side. Wallet was already credited at
+      // settlement, so this is purely a status flip + audit event. The
+      // server is idempotent — calling twice returns the same PAID ticket.
+      const resp = await casino.post(`/tickets/${idOrCode}/payout`);
+      return normalizeTicket(peel(resp));
     },
 
     async getShiftSummary({ minutes = 720 } = {}) {

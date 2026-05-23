@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CircleDot, Radio } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRoulette } from '../hooks/useRoulette';
@@ -97,12 +97,53 @@ export const Jeux = () => {
         refreshJackpots();
       }
     } catch (err) {
-      setError(err.response?.data?.detail || t('jeux.ticketCreationError'));
-      setTimeout(() => setError(''), 4000);
+      // AGD wraps errors as { error: { message, code, ... } }; standalone uses { detail }
+      const apiErr = err.response?.data;
+      const msg =
+        apiErr?.error?.message ||
+        apiErr?.detail ||
+        apiErr?.message ||
+        t('jeux.ticketCreationError');
+      setError(Array.isArray(msg) ? msg.join(' / ') : msg);
+      setTimeout(() => setError(''), 5000);
     } finally {
       setLoading(false);
     }
   };
+
+  // Live-poll a PENDING ticket until it resolves (cyclic AGD path).
+  // Every 2 seconds we refetch by short_code and update the open receipt
+  // so the cashier sees PENDING → WON|LOST without closing the modal. The
+  // poll stops on the first non-PENDING status or when the modal closes.
+  useEffect(() => {
+    if (!lastTicket || lastTicket.status !== 'PENDING') return;
+    const code = lastTicket.short_code;
+    if (!code) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await ticketApi.getDetails(code);
+        if (cancelled) return;
+        if (res?.data && res.data.status !== 'PENDING') {
+          setLastTicket(res.data);
+          if (res.data.status === 'WON' && (res.data.total_payout || 0) > 0) {
+            // Jackpot or bet win — refresh wallet so the badge reflects the credit
+            await fetchBalance(user?.id);
+            refreshJackpots?.();
+          }
+          return; // settled — stop polling
+        }
+      } catch {
+        /* network blip: retry next tick */
+      }
+      if (!cancelled) timer = window.setTimeout(tick, 2000);
+    };
+    let timer = window.setTimeout(tick, 2000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [lastTicket, fetchBalance, refreshJackpots, user?.id]);
 
   return (
     <div className="animate-fade" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

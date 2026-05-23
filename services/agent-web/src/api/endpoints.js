@@ -24,24 +24,33 @@ export const ticketApi = {
    * Place a ticket. Body shape historically: { lines, replay_rounds, … }
    * In agd mode `replay_rounds` is collapsed to 1 (one spin per call).
    */
+  // In agd mode the adapter already normalizes the spin into the legacy
+  // "Python ticket" shape (snake_case, status WON/LOST/PENDING etc.) so we
+  // return the normalized object as `data` directly. The standalone adapter
+  // returns the Python service response verbatim — also snake_case — so the
+  // contract is identical from the page's perspective.
   create: (data) =>
     getAdapter()
       .placeTicket({
         bets: data.lines || data.bets || [],
         replayRounds: data.replay_rounds ?? 1,
         gameCode: data.game_code,
+        // Cyclic AGD needs the engine round_id for anti-décalage validation.
+        // Standalone ignores it (its ticket-service reads the current round
+        // from Redis directly).
+        roundId: data.round_id,
       })
-      .then((t) => ({ data: t?.raw, normalized: t })),
+      .then((t) => ({ data: t, normalized: t })),
 
   getDetails: (code) =>
     getAdapter()
       .getTicket(code)
-      .then((t) => ({ data: t?.raw, normalized: t })),
+      .then((t) => ({ data: t, normalized: t })),
 
   payout: (code) =>
     getAdapter()
       .payout(code)
-      .then((t) => ({ data: t?.raw, normalized: t })),
+      .then((t) => ({ data: t, normalized: t })),
 
   /**
    * Admin stats — only standalone exposes this today; in agd mode we

@@ -27,6 +27,7 @@ const search = typeof window !== "undefined" ? new URLSearchParams(window.locati
 const embedParam = search?.get("embed");
 const tokenParam = search?.get("token");
 
+
 export const INTEGRATION_MODE = (env.VITE_INTEGRATION_MODE || "standalone").toLowerCase();
 export const IS_AGD = INTEGRATION_MODE === "agd";
 export const IS_STANDALONE = !IS_AGD;

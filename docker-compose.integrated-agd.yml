@@ -17,8 +17,11 @@
 # =============================================================================
 
 services:
-  # Single Python engine instance, on-demand mode.
-  # No game loop, no Unity WS — only the REST API consumed by agd-casino-service.
+  # Single Python engine instance, CYCLIC mode for AGD integration.
+  # game_loop runs Betting/Closing/Spinning/Result phases on a fixed cadence,
+  # publishes phase transitions to Redis channel "roulette-events" which
+  # agd-casino-service consumes via RouletteCycleSyncService. This restores
+  # the cashier UX: PENDING ticket → async settlement → live WS update.
   casino-roulette-engine:
     build:
       context: ./services/game-roulette-service
@@ -27,7 +30,7 @@ services:
     restart: unless-stopped
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
-      - ENGINE_MODE=on_demand
+      - ENGINE_MODE=cyclic
       - REDIS_URL=redis://:DevRedis2024SecurePassword@agd-redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://agd:DevPostgres2024SecurePassword@agd-postgres:5432/casino_roulette_db
       - ROULETTE_ENGINE_INTERNAL_API_KEY=DevRouletteInternal2026
