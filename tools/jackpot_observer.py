@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import datetime as dt
 import json
+import os
 import random
 import sys
 from urllib.parse import urlparse
@@ -87,9 +88,12 @@ async def resolve_agent_id(base: str, kiosk_code: str) -> str:
         return r.json()["agent_id"]
 
 
-async def fire_one_ticket(base: str, agent_id: str, round_id: str) -> dict | None:
+async def fire_one_ticket(base: str, agent_id: str, round_id: str, token: str | None = None) -> dict | None:
     bets = random_bets(n=random.randint(1, 3))
-    token = pyjwt.encode({"sub": agent_id}, JWT_SECRET, algorithm="HS256")
+    # Use a server-issued token when provided (via $OBSERVER_TOKEN or --password
+    # login). Falls back to local JWT signing when the script knows JWT_SECRET.
+    if not token:
+        token = pyjwt.encode({"sub": agent_id}, JWT_SECRET, algorithm="HS256")
     payload = {
         "agent_id": agent_id,
         "game_id": ROULETTE_GAME_ID,
@@ -120,20 +124,33 @@ def short_jackpots(j: dict | None) -> str:
 
 async def observe(args):
     agent_id = None
+    server_token = None
     if args.fire_tickets:
         agent_id = await resolve_agent_id(args.base, args.kiosk_code)
-        print(f"[setup]  fire-tickets enabled — agent_id={agent_id}")
+        # Prefer a server-issued token when available — works with prods whose
+        # JWT_SECRET differs from the script's default.
+        server_token = os.getenv("OBSERVER_TOKEN")
+        if not server_token and args.password and args.phone:
+            async with httpx.AsyncClient(base_url=args.base, timeout=10.0) as c:
+                lr = await c.post("/api/agents/login", json={"phone": args.phone, "password": args.password})
+                if lr.status_code == 200:
+                    server_token = lr.json().get("access_token")
+                    print(f"[setup]  login OK — using server-issued JWT")
+                else:
+                    print(f"[setup]  login FAILED status={lr.status_code} — falling back to local JWT signing")
+        print(f"[setup]  fire-tickets enabled — agent_id={agent_id}  token={'server' if server_token else 'local-signed'}")
 
     url = ws_url_from_base(args.base, args.kiosk_code)
     print(f"[setup]  WS → {url}")
     print(f"[setup]  base → {args.base}")
     print(f"[setup]  kiosk → {args.kiosk_code}")
-    print(f"[setup]  fire-tickets → {args.fire_tickets} (rounds={args.rounds})")
+    print(f"[setup]  fire-tickets → {args.fire_tickets} (rounds={args.rounds}, tickets/round={args.tickets_per_round})")
     print("─" * 80)
 
     rounds_seen: set[str] = set()
     rounds_fired: set[str] = set()
     pots_last: dict | None = None
+    jackpot_updates_post_fire = 0
 
     try:
         async with websockets.connect(url, ping_interval=20) as ws:
@@ -154,7 +171,9 @@ async def observe(args):
                     new_phase = msg.get("phase")
                     rid = msg.get("gameId") or msg.get("round_id") or ""
                     print(f"[{now()}] PHASE     → {new_phase:<12} round={rid}")
-                    # Fire one ticket on the very first Betting we see (per round).
+                    # Fire N tickets on the very first Betting we see (per round).
+                    # We do it sequentially with a small delay so the requests
+                    # don't all land on the same Postgres tx slot.
                     if (
                         args.fire_tickets
                         and new_phase == "Betting"
@@ -163,7 +182,10 @@ async def observe(args):
                         and len(rounds_fired) < args.rounds
                     ):
                         rounds_fired.add(rid)
-                        await fire_one_ticket(args.base, agent_id, rid)
+                        for i in range(args.tickets_per_round):
+                            await fire_one_ticket(args.base, agent_id, rid, token=server_token)
+                            if i < args.tickets_per_round - 1:
+                                await asyncio.sleep(0.3)
 
                 elif t == "result_revealed":
                     rid = msg.get("gameId") or ""
@@ -185,6 +207,11 @@ async def observe(args):
                         delta_str = ""
                     print(f"[{now()}] JACKPOTS  {short_jackpots(new)}{delta_str}")
                     pots_last = new
+                    # Count jackpot updates that arrive after we started firing,
+                    # so the exit condition can wait for the settlement broadcast
+                    # rather than quitting on the bare result_revealed.
+                    if rounds_fired:
+                        jackpot_updates_post_fire += 1
 
                 elif t == "stats_updated":
                     s = msg.get("stats") or {}
@@ -199,13 +226,19 @@ async def observe(args):
                     print(f"[{now()}] {t:<10} {json.dumps(msg)[:160]}")
 
                 # Stop condition for --fire-tickets after N rounds finished.
+                # The engine broadcasts jackpot_updated TWICE per round:
+                #   1) from game_loop, before settlement → deltas all zero
+                #   2) from consume_jackpot_events (Redis), after the ticket
+                #      settlement → real deltas (what the operator wants to see)
+                # So we wait for the 2nd broadcast before exiting.
                 if (
                     args.fire_tickets
                     and len(rounds_seen) >= args.rounds
                     and rounds_fired
                     and rounds_seen >= rounds_fired
+                    and jackpot_updates_post_fire >= 2 * len(rounds_fired)
                 ):
-                    print(f"\n[done]   observed {args.rounds} rounds with fired tickets, exiting.")
+                    print(f"\n[done]   observed {args.rounds} round(s) with fired tickets and settlement deltas, exiting.")
                     return
     except websockets.exceptions.InvalidStatusCode as e:
         print(f"\n[fatal] WS rejected by server: HTTP {e.status_code}")
@@ -227,6 +260,12 @@ def parse_args():
                    help="Also create 1 ticket per round on this kiosk to drive jackpot growth")
     p.add_argument("--rounds", type=int, default=3,
                    help="Number of rounds to observe before exit when --fire-tickets is set")
+    p.add_argument("--tickets-per-round", type=int, default=1,
+                   help="How many tickets to fire per Betting window (default 1)")
+    p.add_argument("--phone", default=None,
+                   help="Agent phone for /agents/login (use with --password if the prod JWT_SECRET differs from the script's default)")
+    p.add_argument("--password", default=None,
+                   help="Agent password for /agents/login")
     return p.parse_args()
 
 
