@@ -112,5 +112,12 @@ jobs:
             # Recreate only the services whose images changed.
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
+            # Traefik bind-mounts dynamic-prod.yml as a SINGLE FILE. When this
+            # deploy SCPs a new version the host inode changes, but a *running*
+            # container keeps the old inode — so its --providers.file.watch
+            # never sees added/removed routers (e.g. new game services). Force-
+            # recreate the gateway so it re-binds the freshly-synced config.
+            docker compose -f docker-compose.prod.yml up -d --force-recreate traefik
+
             # Free space taken by old image layers.
             docker image prune -f
