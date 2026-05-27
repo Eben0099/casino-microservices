@@ -183,7 +183,7 @@ function Agents() {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="rounded-xl p-6 w-full max-w-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-lg font-bold font-title" style={{ color: 'var(--text-primary)' }}>Nouveau Caissier</h3>
@@ -228,7 +228,7 @@ function Agents() {
 
       {/* Detail Modal */}
       {showDetailModal && selectedAgent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="rounded-xl p-6 w-full max-w-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-lg font-bold font-title" style={{ color: 'var(--text-primary)' }}>Detail Agent</h3>
@@ -291,7 +291,7 @@ function Agents() {
 
       {/* Provision Modal */}
       {showProvisionModal && selectedAgent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="rounded-xl p-6 w-full max-w-md" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-lg font-bold font-title" style={{ color: 'var(--text-primary)' }}>Provision Caisse</h3>

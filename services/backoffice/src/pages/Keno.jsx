@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useKenoWs } from '../hooks/useKenoWs';
 import { BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { Radio, Flame, Snowflake, RefreshCw, TrendingUp } from 'lucide-react';
+import GamesSidebar from '../components/GamesSidebar';
 
 /* ─────────────  Helpers  ───────────── */
 
@@ -456,7 +457,7 @@ function useAdminHistory() {
 /* ─────────────  Page  ───────────── */
 
 function Keno() {
-  const { connected, phase, drawId, drawnNumbers, stats, jackpot, medals } = useKenoWs();
+  const { connected, phase, drawId, drawnNumbers, revealedNumbers, stats, jackpot, medals } = useKenoWs();
   const { adminDraws, histLoading, fetchHistory } = useAdminHistory();
 
   // Prefer WS stats recentDraws when available, fall back to admin REST
@@ -464,10 +465,10 @@ function Keno() {
     ? stats.recentDraws
     : adminDraws;
 
-  // "Derniers tirés" — the 20 numbers of the latest completed draw,
-  // displayed in draw reveal order (from drawnNumbers when in draw/results phase),
-  // otherwise the last recentDraw's sorted numbers.
-  const lastDrawNumbers = drawnNumbers
+  // "Derniers tirés" — during the `draw` phase these appear progressively
+  // (revealedNumbers grows 0→20), full during `results`, and on idle we fall
+  // back to the last completed draw's numbers.
+  const lastDrawNumbers = revealedNumbers
     || (recentDraws.length > 0 ? recentDraws[recentDraws.length - 1]?.numbers : null);
 
   return (
@@ -525,14 +526,17 @@ function Keno() {
         </Card>
       )}
 
-      {/* Main 2-column layout: heatmap + right panel */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr minmax(260px, 320px)' }}>
+      {/* Main 3-column layout: game switcher + heatmap + right panel */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(120px, 132px) 1fr minmax(260px, 320px)' }}>
 
-        {/* LEFT — Heatmap + distributions */}
+        {/* LEFT — Game switcher (shared, route-aware) */}
+        <GamesSidebar />
+
+        {/* CENTER — Heatmap + distributions */}
         <div className="space-y-4 min-w-0">
           <Card title="Heatmap 1–80" sub="Fréquence sur 20 derniers tirages · cases en or = tirage actuel">
             {stats || drawnNumbers ? (
-              <KenoHeatmap stats={stats} drawnNumbers={drawnNumbers} />
+              <KenoHeatmap stats={stats} drawnNumbers={revealedNumbers} />
             ) : (
               <div className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>
                 En attente des données stats…

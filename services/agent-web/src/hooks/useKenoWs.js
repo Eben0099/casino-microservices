@@ -225,7 +225,20 @@ export const useKenoWs = (kioskCode) => {
     // kioskCode intentionally in the dep array — reconnect when kiosk changes
   }, [kioskCode]);
 
-  return state;
+  // Progressive reveal: during the `draw` phase the 20 numbers (delivered all
+  // at once by draw_locked) are surfaced one-by-one, paced over the phase
+  // duration. Recomputed on each countdown tick. Full set during `results`,
+  // null on idle. `drawnNumbers` (full) stays available for callers that need it.
+  const { phase, drawnNumbers, phaseStartedAt, duration } = state;
+  let revealedNumbers = drawnNumbers;
+  if (drawnNumbers && drawnNumbers.length && phase === 'draw') {
+    const total = drawnNumbers.length;
+    const perBall = Math.max(250, (duration || 67000) / total);
+    const c = Math.max(0, Math.min(total, Math.floor((Date.now() - phaseStartedAt) / perBall) + 1));
+    revealedNumbers = drawnNumbers.slice(0, c);
+  }
+
+  return { ...state, revealedNumbers };
 };
 
 export default useKenoWs;

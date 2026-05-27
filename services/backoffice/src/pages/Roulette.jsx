@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouletteWs } from '../hooks/useRouletteWs';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { Radio, Flame, Snowflake } from 'lucide-react';
+import GamesSidebar from '../components/GamesSidebar';
 
 /* ─────────────  Helpers  ───────────── */
 const RED_NUMBERS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
@@ -71,42 +72,6 @@ const Card = ({ title, sub, children, className = '', noPad }) => (
 );
 
 /* ─────────────  Game tiles (left column)  ───────────── */
-const GAMES = [
-  { code: 'SW', label: 'Spin & Win',  active: true,  available: true  },
-  { code: 'VK', label: 'VolKeno',     active: false, available: false },
-  { code: 'S3', label: 'Super 3',     active: false, available: false },
-  { code: 'CR', label: 'Crash',       active: false, available: false },
-  { code: 'LO', label: 'Loto',        active: false, available: false },
-];
-
-const GameTile = ({ code, label, active, available }) => {
-  const base = 'rounded-xl px-3 py-4 flex flex-col items-center gap-1 select-none transition-colors text-center';
-  const styleActive = {
-    background: 'var(--accent)',
-    color: 'var(--text-on-accent)',
-    border: '1px solid var(--accent)',
-    boxShadow: '0 0 0 3px rgba(245,158,11,0.18)',
-  };
-  const styleIdle = {
-    background: 'var(--bg-tile)',
-    color: 'var(--text-secondary)',
-    border: '1px solid var(--border-subtle)',
-    cursor: available ? 'pointer' : 'not-allowed',
-    opacity: available ? 1 : 0.55,
-  };
-  return (
-    <div className={base} style={active ? styleActive : styleIdle}>
-      <span className={`text-lg font-black tracking-wide`} style={{ fontFamily: 'Raleway' }}>{code}</span>
-      <span className={`text-[12px] font-semibold ${active ? '' : ''}`}>{label}</span>
-      {!available && (
-        <span className="text-[9px] font-bold tracking-widest mt-1 px-1.5 py-0.5 rounded"
-          style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
-          BIENTÔT
-        </span>
-      )}
-    </div>
-  );
-};
 
 /* ─────────────  Roulette grid (european layout)  ───────────── */
 /* Order on a real european table — top row: 3,6,9,…,36 ; middle: 2,5,…,35 ; bottom: 1,4,…,34 */
@@ -278,12 +243,8 @@ function Roulette() {
 
       {/* 3-column layout — match keno reference */}
       <div className="grid gap-5" style={{ gridTemplateColumns: 'minmax(120px, 132px) 1fr minmax(280px, 360px)' }}>
-        {/* LEFT — Game selector */}
-        <aside className="space-y-2">
-          {GAMES.map((g) => (
-            <GameTile key={g.code} {...g} />
-          ))}
-        </aside>
+        {/* LEFT — Game switcher (shared, route-aware) */}
+        <GamesSidebar />
 
         {/* CENTER — Phase + roulette grid + outside bets + history strip */}
         <section className="space-y-4 min-w-0">

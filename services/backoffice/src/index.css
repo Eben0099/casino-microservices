@@ -97,9 +97,14 @@ input, select, textarea { font-family: inherit; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 
 /* ═══════ ANIMATIONS ═══════ */
+/* Opacity-only fade: NO transform. A `transform` on the page wrapper (even the
+   identity matrix left by `forwards` on a translateY keyframe) makes it the
+   containing block for `position: fixed` descendants — which traps every inline
+   modal (`fixed inset-0`) inside the tall content area instead of the viewport,
+   so the modal centers off-screen and looks like it "doesn't open". */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .animate-fade { animation: fadeIn 0.25s ease forwards; }
 

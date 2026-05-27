@@ -42,6 +42,7 @@ export const Keno = () => {
     drawId,
     remaining,
     drawnNumbers,
+    revealedNumbers,
     jackpot,
     medals,
     connected,
@@ -362,7 +363,7 @@ export const Keno = () => {
             onToggle={handleToggle}
             maxSpots={maxSpots}
             isBettingOpen={isBettingOpen}
-            drawnNumbers={drawnNumbers}
+            drawnNumbers={revealedNumbers}
           />
 
           {/* Add-to-slip action row */}

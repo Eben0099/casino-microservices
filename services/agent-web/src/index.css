@@ -86,9 +86,13 @@ input:focus { outline: none; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 
 /* ═══════ ANIMATIONS ═══════ */
+/* Opacity-only fade: NO transform. A `transform` left on the page wrapper
+   (the identity matrix from `forwards` on a translateY keyframe) makes it the
+   containing block for `position: fixed` modals (receipt, overlays), trapping
+   them inside the tall content area instead of the viewport. */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .animate-fade { animation: fadeIn 0.25s ease forwards; }
 

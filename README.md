@@ -1,6 +1,6 @@
 # AGDTech Casino Backend
 
-Multi-game casino platform (European roulette in production, more games coming) built on a FastAPI + Postgres + Redis microservices architecture, behind a Traefik gateway. Two React web clients are bundled (agent POS + admin backoffice). A Unity client connects to the game engine over WebSocket for real-time roulette.
+Multi-game casino platform (European **roulette** + **Keno/VOLKENO** in production, more games coming) built on a FastAPI + Postgres + Redis microservices architecture, behind a Traefik gateway. Two React web clients are bundled (agent POS + admin backoffice). Display clients (Unity / Next.js) connect to each game engine over WebSocket for real-time play. A dedicated `jackpot-service` is the single source of truth for all jackpots across every game.
 
 ---
 
@@ -71,12 +71,16 @@ See **`docs/DEPLOYMENT_MODES.md`** for the operational guide (network topology, 
 |---|---|---|---|
 | `agent-service` | FastAPI + Postgres | Agents, cash registers, transactions, JWT login | `casino_agent_db` |
 | `ticket-service` | FastAPI + Postgres + Redis | Ticket issuance/payout, automatic settlement | `casino_ticket_db` |
-| `game-roulette-service` | FastAPI + Postgres + Redis | Game engine (state machine), RNG, WebSocket | `casino_roulette_db` |
+| `game-roulette-service` | FastAPI + Postgres + Redis | Roulette engine (state machine), RNG, WebSocket `/ws/roulette` | `casino_roulette_db` |
+| `game-keno-service` | FastAPI + Postgres + Redis | Keno engine (VOLKENO protocol), 80-ball RNG, WebSocket `/ws/keno` | `casino_keno_db` |
+| `jackpot-service` | FastAPI + Postgres + Redis | **Single source of truth** for all jackpots (GLOBAL/GAME/LOCAL), distribution rules, HIT detection | `casino_jackpot_db` |
 | `display-service` | FastAPI + Redis | WebSocket relay for passive clients (TV displays) | (stateless) |
 | `backoffice` | React 18 + Vite + Tailwind | Admin console (multi-game) | — |
 | `agent-web` | React 18 + Vite + Tailwind | Agent POS | — |
 
-**Inter-service communication:** synchronous HTTP (ticket -> agent for cash debit/credit) + Redis Pub/Sub (roulette -> ticket for settlement, roulette -> display for fan-out).
+**Inter-service communication:** synchronous HTTP (ticket → agent for cash debit/credit ; ticket → jackpot for the per-sale contribution) + Redis Pub/Sub (`roulette-events`/`keno-events` → ticket for settlement, `jackpot-updated` → game engines for WS fan-out, roulette → display).
+
+> Game engines do **not** own jackpot balances anymore — they read the canonical pots from `jackpot-service` and relay them to their WebSocket clients. See the **Jackpots** and **Keno** sections below, plus [`docs/JACKPOT_SERVICE_PLAN.md`](docs/JACKPOT_SERVICE_PLAN.md) and [`docs/KENO_IMPLEMENTATION_PLAN.md`](docs/KENO_IMPLEMENTATION_PLAN.md).
 
 ---
 
@@ -654,6 +658,54 @@ These two endpoints accept any `Origin` (no JWT, no cookie required). They can b
 
 ---
 
+## Keno (VOLKENO)
+
+Second game in production. The `game-keno-service` engine implements the **VOLKENO** display protocol documented in [`docs/BACKEND.md`](docs/BACKEND.md) and is wired exactly like roulette (admin page, cashier page, ticket settlement, infra). Full plan: [`docs/KENO_IMPLEMENTATION_PLAN.md`](docs/KENO_IMPLEMENTATION_PLAN.md).
+
+- **WebSocket:** `/ws/keno` (alias `/ws/volkeno`) — `?kiosk_id=<code>` required for kiosk-scoped clients (unknown id → HTTP 403 at handshake); absent id = global-only admin view.
+- **Phases:** `idle` (betting window) → `preLaunch` → `draw` → `results`. Timestamps are epoch-ms.
+- **Draw:** 20 unique numbers in `[1..80]`, committed atomically (`draw_locked`). The admin and cashier UIs reveal them **progressively**, one-by-one paced over the `draw` phase (purely presentational; the engine still sends all 20 at once).
+- **Tickets:** `POST /api/tickets/` with `game_id="KENO-DRAW1"`, `round_id=<drawId>`, bets `{bet_type:"KENO", bet_target:"<picked numbers csv>", amount}`. Settled by `ticket-service` on the `keno-events` channel via the paytable (spots × matches). Fully isolated from roulette (`keno-events` / `roulette-events`).
+- **Engine modes:** same `ENGINE_MODE` toggle as roulette (`cyclic` standalone loop vs `on_demand`).
+
+### REST (`game-keno-service` — `/api/keno`)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/keno/status` | — | Current phase / drawId |
+| `GET` | `/api/keno/settings/public` | — | min/max stake, enabled, default spots |
+| `GET` | `/api/keno/verify/{round_id}` | — | Provably-fair replay of a draw |
+| `GET/PATCH` | `/api/keno/admin/settings` | `x-api-key` | Phase durations, stakes, spots |
+| `GET` | `/api/keno/admin/history` | `x-api-key` | Last draws |
+
+---
+
+## Jackpots: unified source of truth
+
+`jackpot-service` (DB `casino_jackpot_db`) owns **every** jackpot pot for **every** game — there is exactly **one** "Jackpot Général", not one per game. Model:
+
+| Scope | Keyed by | Fed by | Example |
+|---|---|---|---|
+| `GLOBAL` | — | **all tickets, all games, all kiosks** | Jackpot Général |
+| `GAME` | `game_id` | all tickets of that game, all kiosks | Spin & Win, VolKeno |
+| `LOCAL` | `game_id` + `kiosk_code` + `tier` | tickets of that game on that kiosk | bronze / silver / gold |
+
+- **Contribution is synchronous at sale time:** `ticket-service` calls `POST /internal/contribute` on every ticket; the response carries any **HIT** so the winning ticket is awarded immediately. Fail-open — a jackpot-service outage never blocks a sale.
+- **Distribution rules are admin-defined** (backoffice → *Jackpots*): per pot — `PERCENT`/`FIXED` contribution, secret random threshold range `[min,max]`, reset mode, winner mode, max-payout cap, enabled. The actual trigger threshold is drawn randomly in the range and **never exposed**.
+- **Uniqueness** of GLOBAL/GAME pots is guaranteed by partial unique indexes (NULL-safe), so the seed can never create a duplicate "Général".
+- **Reads:** `GET /api/jackpots?game_id=&kiosk_code=` → `{general, game:{game_id,amount}, locals:{bronze,silver,gold}}`. Game engines consume this (and the `jackpot-updated` Redis channel) to feed their WebSocket clients; the frontends' jackpot bars read it too.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/internal/contribute` | internal key | Per-ticket contribution + HIT detection |
+| `GET` | `/api/jackpots?game_id=&kiosk_code=` | — | Display amounts for a game/kiosk |
+| `GET/POST/PATCH` | `/api/jackpots/admin/pots` | `x-api-key` | List / create / edit pots (the distribution rules) |
+| `GET` | `/api/jackpots/admin/pots/wins` | `x-api-key` | HIT history |
+
+Details: [`docs/JACKPOT_SERVICE_PLAN.md`](docs/JACKPOT_SERVICE_PLAN.md).
+
+---
+
 ## Bet types (roulette)
 
 All `bet_target` values are strings.
@@ -735,13 +787,15 @@ After the round, the `server_seed` is exposed via `GET /api/roulette/admin/histo
 
 ## Databases
 
-Three separate databases (one per bounded context) on **a single Postgres 16 instance**:
+Separate databases (one per bounded context) on **a single Postgres 16 instance** (each service creates its own DB on boot via `init_db`):
 
 | Database | Main tables |
 |---|---|
 | `casino_agent_db` | `agents`, `cash_registers`, `cash_register_transactions` |
 | `casino_ticket_db` | `tickets`, `ticket_bets` |
 | `casino_roulette_db` | `roulette_rounds` |
+| `casino_keno_db` | `keno_draws` |
+| `casino_jackpot_db` | `jackpot_pots`, `jackpot_contributions`, `jackpot_wins` |
 
 Alembic migrations run automatically on boot (`alembic upgrade head` runs before `uvicorn`). To create a new migration after a model change:
 ```bash

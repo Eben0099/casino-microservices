@@ -7,10 +7,15 @@ export function useKenoWs() {
   const [connected, setConnected] = useState(false);
   const [phase, setPhase] = useState(null);
   const [drawId, setDrawId] = useState(null);
-  const [drawnNumbers, setDrawnNumbers] = useState(null);   // int[20] or null
+  const [drawnNumbers, setDrawnNumbers] = useState(null);   // int[20] or null (full set)
+  const [revealCount, setRevealCount] = useState(0);         // how many balls revealed so far
   const [stats, setStats] = useState(null);                  // StatsSnapshot (BACKEND.md §3)
   const [jackpot, setJackpot] = useState(null);              // {generalAmount, volkenoAmount, currency, lastHitDrawId}
   const [medals, setMedals] = useState(null);                // {bronze, silver, gold}
+
+  // Draw-phase timing (client clock) used to pace the progressive reveal.
+  const drawStartRef = useRef(0);
+  const drawDurationRef = useRef(67000);
 
   const wsRef = useRef(null);
   const retryRef = useRef(null);
@@ -36,6 +41,8 @@ export function useKenoWs() {
               setPhase(msg.phase);
               setDrawId(msg.currentDrawId);
               setDrawnNumbers(msg.drawnNumbers ?? null);
+              // Reconnect mid-draw: snap balls to slots without re-animating.
+              setRevealCount(msg.drawnNumbers ? msg.drawnNumbers.length : 0);
               if (msg.stats)   setStats(msg.stats);
               if (msg.jackpot) setJackpot(msg.jackpot);
               if (msg.medals)  setMedals(msg.medals);
@@ -45,13 +52,26 @@ export function useKenoWs() {
               // drawId bumps only on idle entry (BACKEND.md §2).
               setPhase(msg.phase);
               setDrawId(msg.drawId);
-              // Clear drawn numbers when we enter idle (new round not drawn yet)
-              if (msg.phase === 'idle') setDrawnNumbers(null);
+              if (msg.phase === 'draw') {
+                // Start the progressive reveal from 0, paced over this phase.
+                drawStartRef.current = Date.now();
+                drawDurationRef.current = msg.durationMs || 67000;
+                setRevealCount(0);
+              } else if (msg.phase === 'idle') {
+                // New round not drawn yet.
+                setDrawnNumbers(null);
+                setRevealCount(0);
+              }
               break;
 
             case 'draw_locked':
-              // 20 unique numbers in reveal order — BACKEND.md §3.
+              // 20 unique numbers in reveal order — BACKEND.md §3. The numbers
+              // are committed atomically here; we reveal them one-by-one below.
               setDrawnNumbers(msg.numbers ?? null);
+              if (!drawStartRef.current || Date.now() - drawStartRef.current > 2000) {
+                drawStartRef.current = Date.now();
+              }
+              setRevealCount(0);
               break;
 
             case 'stats_updated':
@@ -110,5 +130,28 @@ export function useKenoWs() {
     };
   }, [connect]);
 
-  return { connected, phase, drawId, drawnNumbers, stats, jackpot, medals };
+  // Progressive reveal: while in the `draw` phase, grow revealCount 0→N paced
+  // evenly over the phase duration so the numbers appear one after another.
+  useEffect(() => {
+    if (phase !== 'draw' || !drawnNumbers || !drawnNumbers.length) return;
+    const total = drawnNumbers.length;
+    const perBall = Math.max(250, (drawDurationRef.current || 67000) / total);
+    const tick = () => {
+      const elapsed = Date.now() - drawStartRef.current;
+      const c = Math.max(0, Math.min(total, Math.floor(elapsed / perBall) + 1));
+      setRevealCount(c);
+      return c >= total;
+    };
+    if (tick()) return;
+    const id = setInterval(() => { if (tick()) clearInterval(id); }, Math.min(450, perBall));
+    return () => clearInterval(id);
+  }, [phase, drawnNumbers]);
+
+  // Numbers to display: progressive during `draw`, full during `results`,
+  // null on idle (no draw yet).
+  const revealedNumbers = !drawnNumbers
+    ? null
+    : (phase === 'draw' ? drawnNumbers.slice(0, revealCount) : drawnNumbers);
+
+  return { connected, phase, drawId, drawnNumbers, revealedNumbers, revealCount, stats, jackpot, medals };
 }
