@@ -48,7 +48,10 @@ http_client: httpx.AsyncClient | None = None
 ADMIN_EVENTS_CHANNEL = "admin-events"
 
 JACKPOT_SERVICE_URL = os.getenv("JACKPOT_SERVICE_URL", "http://jackpot-service:8000")
-JACKPOT_INTERNAL_API_KEY = os.getenv("JACKPOT_INTERNAL_API_KEY", "DevJackpotInternal2026")
+# `or default` (not getenv default): compose turns an undefined ${VAR} into an
+# EMPTY env var, which getenv's default would NOT replace. Coalesce empty →
+# default so we send the same key jackpot-service expects when .env is unset.
+JACKPOT_INTERNAL_API_KEY = os.getenv("JACKPOT_INTERNAL_API_KEY") or "DevJackpotInternal2026"
 
 
 async def publish_admin_event(event_type: str, payload: dict):

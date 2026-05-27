@@ -2,7 +2,11 @@ import os
 from fastapi import Header, HTTPException
 
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
-JACKPOT_INTERNAL_API_KEY = os.getenv("JACKPOT_INTERNAL_API_KEY", "")
+# `or default` (not getenv default): compose turns an undefined ${VAR} into an
+# EMPTY string env var, which getenv's default would NOT replace. Coalesce empty
+# → default so the internal key works out-of-the-box and matches ticket-service.
+# Override in prod via JACKPOT_INTERNAL_API_KEY in /opt/casino/.env.
+JACKPOT_INTERNAL_API_KEY = os.getenv("JACKPOT_INTERNAL_API_KEY") or "DevJackpotInternal2026"
 
 
 def verify_admin_key(x_api_key: str = Header(None)) -> str:
