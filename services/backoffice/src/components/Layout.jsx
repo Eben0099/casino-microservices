@@ -5,12 +5,13 @@ import { Sun, Moon, LogOut } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 const NAV_ITEMS = [
-  { label: "Vue d'ensemble", path: '/dashboard' },
-  { label: 'Jeux',            path: '/roulette'  },
-  { label: 'Jackpots',        path: '/jackpots'  },
-  { label: 'Caissiers',       path: '/agents'    },
-  { label: 'Betslip',         path: '/transactions' },
-  { label: 'Paramètres',      path: '/parametres' },
+  { label: "Vue d'ensemble", path: '/dashboard'    },
+  { label: 'Roulette',       path: '/roulette'     },
+  { label: 'Keno',           path: '/keno'         },
+  { label: 'Jackpots',       path: '/jackpots'     },
+  { label: 'Caissiers',      path: '/agents'       },
+  { label: 'Betslip',        path: '/transactions' },
+  { label: 'Paramètres',     path: '/parametres'   },
 ];
 
 const useClock = () => {

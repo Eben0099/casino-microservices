@@ -22,23 +22,29 @@ http.interceptors.request.use((cfg) => {
  */
 function normalizeTicket(raw) {
   if (!raw) return null;
+  // ticket-service returns snake_case (`short_code`, `round_id`, `total_wager`,
+  // `bets`). TicketReceipt reads those snake_case fields directly, while other
+  // consumers use the camelCase aliases below — so we keep BOTH. Bets may come
+  // back as `bets` (current API) or legacy `lines`.
+  const betsSrc = raw.bets ?? raw.lines ?? [];
   return {
-    code: raw.code,
-    id: raw.code,
+    ...raw,
+    code: raw.short_code ?? raw.code,
+    id: raw.short_code ?? raw.code,
     placedAt: raw.placed_at || raw.created_at || null,
     settledAt: raw.settled_at || null,
     status: raw.status || (raw.settled_at ? "settled" : "pending"),
     totalWager: raw.total_wager ?? raw.total_amount ?? 0,
     totalPayout: raw.total_payout ?? 0,
     winningNumber: raw.winning_number ?? null,
-    bets:
-      raw.lines?.map((l) => ({
-        bet_type: l.bet_type,
-        bet_target: l.bet_target,
-        amount: l.amount,
-        payout: l.payout ?? 0,
-        result: l.result || (l.payout > 0 ? "won" : "lost"),
-      })) ?? [],
+    bets: betsSrc.map((l) => ({
+      bet_type: l.bet_type,
+      bet_target: l.bet_target,
+      amount: l.amount,
+      payout: l.payout ?? 0,
+      is_winning: l.is_winning ?? (l.payout > 0),
+      result: l.result || (l.payout > 0 ? "won" : "lost"),
+    })),
     mode: ADAPTER_MODES.STANDALONE,
     raw,
   };
@@ -78,8 +84,18 @@ export function createStandaloneAdapter() {
       return { sessionId: null, kioskCode: null };
     },
 
-    async placeTicket({ bets, replayRounds, gameCode }) {
-      const body = { lines: bets, replay_rounds: replayRounds ?? 1 };
+    async placeTicket({ bets, replayRounds, gameCode, agentId, gameId, roundId }) {
+      // ticket-service's TicketCreate requires agent_id / game_id / round_id /
+      // bets. Forward them all (the cashier page supplies them); keep `lines`
+      // and `game_code` for backward compatibility with any older handler.
+      const body = {
+        agent_id: agentId,
+        game_id: gameId,
+        round_id: roundId != null ? String(roundId) : undefined,
+        bets,
+        lines: bets,
+        replay_rounds: replayRounds ?? 1,
+      };
       if (gameCode) body.game_code = gameCode;
       const { data } = await http.post("/tickets/", body);
       return normalizeTicket(data);

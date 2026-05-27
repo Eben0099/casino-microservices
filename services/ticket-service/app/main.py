@@ -21,8 +21,8 @@ from .database import get_db, AsyncSessionLocal
 from .models import Ticket, TicketBet, TicketStatus
 from .schemas import TicketCreate, TicketResponse, TicketDetailResponse
 from .rules import calculate_payout
+from .keno_rules import calculate_keno_payout
 from .security import get_current_agent_id, verify_admin_key
-from .jackpot import services as jackpot_services
 from .replay import services as replay_services
 from sqlalchemy import func
 
@@ -30,11 +30,6 @@ app = FastAPI(
     title="AGDTech Ticket Service",
     root_path=os.getenv("ROOT_PATH", "")
 )
-
-# Module jackpot : routes admin + publiques (cf docs/jackpot-system.md)
-from .jackpot.routes import admin_router as jackpot_admin_router, public_router as jackpot_public_router
-app.include_router(jackpot_admin_router)
-app.include_router(jackpot_public_router)
 
 # Module replay : plans de tickets recurrents
 from .replay.routes import router as replay_router
@@ -51,6 +46,9 @@ redis_client = None
 http_client: httpx.AsyncClient | None = None
 
 ADMIN_EVENTS_CHANNEL = "admin-events"
+
+JACKPOT_SERVICE_URL = os.getenv("JACKPOT_SERVICE_URL", "http://jackpot-service:8000")
+JACKPOT_INTERNAL_API_KEY = os.getenv("JACKPOT_INTERNAL_API_KEY", "DevJackpotInternal2026")
 
 
 async def publish_admin_event(event_type: str, payload: dict):
@@ -143,8 +141,10 @@ async def startup_event():
     limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=30.0)
     http_client = httpx.AsyncClient(timeout=10.0, limits=limits)
 
-    # ON LANCE NOTRE ECOUTEUR EN ARRIÈRE-PLAN
+    # Roulette listener (pre-existing)
     asyncio.create_task(listen_to_roulette_results())
+    # Keno listener — dedicated channel, fully isolated from roulette
+    asyncio.create_task(listen_to_keno_results())
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -269,57 +269,156 @@ async def process_settlement(round_id: str, winning_number: str):
         "total_payout": total_payout_round,
     })
 
-    # ------------------------------------------------------------------
-    # Jackpot growth feed : agrege les mises du round et publie sur le
-    # canal `jackpot-events`. Consomme par game-roulette-service qui fait
-    # croitre les 5 pots Unity (general, spin2win, bronze, silver, gold).
-    # On opere ici (pas dans la boucle batch) pour eviter de re-publier
-    # plusieurs fois par round. Bigint-safe : valeurs en XAF entiers.
-    # ------------------------------------------------------------------
-    try:
-        async with AsyncSessionLocal() as db:
-            total_wager_result = await db.execute(
-                select(func.coalesce(func.sum(Ticket.total_wager), 0))
-                .where(Ticket.round_id == round_id)
-            )
-            total_wager = int(total_wager_result.scalar() or 0)
 
-            # Tickets sans kiosk_code (lookup foire ou agent sans kiosque) :
-            # exclus du dict per-kiosk MAIS deja comptes dans total_wager
-            # plus haut. Ils n'alimenteront donc que les pots globaux.
-            per_kiosk_result = await db.execute(
-                select(Ticket.kiosk_code, func.sum(Ticket.total_wager))
+# ---------------------------------------------------------------------------
+# Keno settlement — dedicated channel, no roulette paths touched below.
+# ---------------------------------------------------------------------------
+
+KENO_SETTINGS_URL = os.getenv("KENO_SETTINGS_URL", "http://game-keno-service:8000")
+
+
+async def listen_to_keno_results():
+    """Background task: subscribe to `keno-events` and settle Keno tickets.
+
+    Mirrors listen_to_roulette_results() but on a fully isolated Redis channel.
+    Roulette channels (roulette-events / jackpot-events) are never touched here.
+    """
+    logger.info("Ticket Service listening for Keno results (keno-events)...")
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("keno-events")
+
+    async for message in pubsub.listen():
+        if message["type"] != "message":
+            continue
+        try:
+            data = json.loads(message["data"])
+        except Exception as e:
+            logger.error(f"KENO_LISTENER_JSON_FAIL error={e}")
+            continue
+
+        # Primary: settle finished round
+        if data.get("event") == "ROUND_FINISHED":
+            round_id = data.get("round_id")
+            drawn_numbers = data.get("drawn_numbers")
+            if not round_id or not isinstance(drawn_numbers, list):
+                logger.warning(f"KENO_ROUND_FINISHED_INVALID payload={data}")
+                continue
+            logger.info(f"KENO_SETTLEMENT round={round_id} drawn={drawn_numbers}")
+            await process_keno_settlement(str(round_id), drawn_numbers)
+
+        # Optional: new idle phase -> generate replay tickets for Keno plans.
+        # Mirrors the roulette `phase_changed -> Betting` branch (plan §4.1).
+        elif data.get("type") == "phase_changed" and data.get("phase") == "idle":
+            draw_id = data.get("drawId")
+            if draw_id is not None:
+                round_id = str(draw_id)
+                try:
+                    created = await replay_services.generate_replay_tickets_for_round(round_id)
+                    if created:
+                        logger.info(f"KENO_REPLAY_TICKETS_GENERATED round={round_id} count={created}")
+                except Exception as e:
+                    logger.error(f"KENO_REPLAY_GENERATION_FAIL round={round_id} error={e}")
+
+
+async def process_keno_settlement(round_id: str, drawn_numbers: list[int]):
+    """Batch-settle all unsettled Keno tickets for a completed round.
+
+    Settlement guard: `drawn_numbers IS NULL` (Keno-specific column added in
+    migration c1d2e3f4a5b6). This mirrors the roulette guard `winning_number
+    IS NULL` without interfering with it. Once a Keno ticket is settled, its
+    `drawn_numbers` column is populated and it drops out of subsequent chunks.
+
+    After settling all batches the function aggregates total_wager /
+    per_kiosk_wager / per_kiosk_medals and publishes ONE `ROUND_SETTLED`
+    message to `keno-jackpot-events` (never to `jackpot-events`).
+
+    Credit path: identical to roulette — payout is stored on the ticket and
+    only paid out when the cashier calls POST /{short_code}/payout. No
+    automatic credit push at settlement time.
+    """
+    total_processed = 0
+    total_won = 0
+    total_lost = 0
+    total_payout_round = 0
+    offset = 0
+
+    while True:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Ticket)
+                .options(selectinload(Ticket.bets))
                 .where(
                     Ticket.round_id == round_id,
-                    Ticket.kiosk_code.isnot(None),
+                    Ticket.game_id.like("KENO%"),
+                    Ticket.status.in_([TicketStatus.PENDING, TicketStatus.WON]),
+                    Ticket.drawn_numbers.is_(None),
                 )
-                .group_by(Ticket.kiosk_code)
+                .order_by(Ticket.created_at)
+                .limit(SETTLEMENT_BATCH_SIZE)
             )
-            per_kiosk_wager = {
-                code: int(wager)
-                for code, wager in per_kiosk_result.all()
-                if code
-            }
+            chunk = list(result.scalars().all())
+            if not chunk:
+                break
 
-        if total_wager > 0 and redis_client:
+            for ticket in chunk:
+                try:
+                    keno_payout = 0
+                    # Mark as settled — this is the idempotency guard.
+                    ticket.drawn_numbers = drawn_numbers
+
+                    for bet in ticket.bets:
+                        if bet.bet_type != "KENO":
+                            # Non-KENO bets on a KENO ticket are left as-is.
+                            continue
+                        payout = calculate_keno_payout(
+                            bet.bet_target or "",
+                            drawn_numbers,
+                            int(bet.amount),
+                        )
+                        bet.payout = payout
+                        bet.is_winning = (payout > 0)
+                        keno_payout += payout
+
+                    ticket.total_payout = (ticket.total_payout or 0) + keno_payout
+                    ticket.status = TicketStatus.WON if ticket.total_payout > 0 else TicketStatus.LOST
+                    total_processed += 1
+                    if ticket.status == TicketStatus.WON:
+                        total_won += 1
+                    else:
+                        total_lost += 1
+                    total_payout_round += int(ticket.total_payout or 0)
+                except Exception as e:
+                    logger.error(f"KENO_SETTLEMENT_ERROR ticket={ticket.short_code} error={e}")
+
             try:
-                await redis_client.publish(
-                    "jackpot-events",
-                    json.dumps({
-                        "event": "ROUND_SETTLED",
-                        "round_id": round_id,
-                        "total_wager": total_wager,
-                        "per_kiosk_wager": per_kiosk_wager,
-                    }),
-                )
-                logger.info(
-                    f"JACKPOT_EVENT_PUBLISHED round={round_id} "
-                    f"total_wager={total_wager} kiosks={len(per_kiosk_wager)}"
-                )
+                await db.commit()
             except Exception as e:
-                logger.error(f"PUBLISH_JACKPOT_EVENT_FAIL round={round_id} error={e}")
-    except Exception as e:
-        logger.error(f"JACKPOT_AGGREGATE_FAIL round={round_id} error={e}")
+                await db.rollback()
+                logger.error(
+                    f"KENO_SETTLEMENT_BATCH_COMMIT_FAIL round={round_id} offset={offset} error={e}"
+                )
+                break
+
+        if len(chunk) < SETTLEMENT_BATCH_SIZE:
+            break
+        offset += SETTLEMENT_BATCH_SIZE
+
+    logger.info(
+        f"KENO_SETTLEMENT_COMPLETE round={round_id} "
+        f"processed={total_processed} won={total_won} lost={total_lost}"
+    )
+
+    if total_processed == 0:
+        logger.info(f"KENO_SETTLEMENT round={round_id} no_pending_tickets")
+
+    await publish_admin_event("keno_round_settled", {
+        "round_id": round_id,
+        "processed": total_processed,
+        "won": total_won,
+        "lost": total_lost,
+        "total_payout": total_payout_round,
+    })
+
 
 @app.get("/admin/stats", dependencies=[Depends(verify_admin_key)])
 async def get_admin_stats(db: AsyncSession = Depends(get_db)):
@@ -388,47 +487,103 @@ async def create_ticket(
     if str(ticket_in.agent_id) != agent_id:
         raise HTTPException(status_code=403, detail="Vous ne pouvez pas créer de ticket pour un autre agent.")
 
-    # 0. VÉRIFICATION DU STATUT DE LA ROULETTE (Le Bouclier)
+    # 0. VÉRIFICATION DU STATUT DU JEU (Le Bouclier)
     if not redis_client:
         raise HTTPException(status_code=503, detail="Connexion au moteur de jeu impossible.")
-        
-    state_json = await redis_client.get("roulette:current_state")
-    if not state_json:
-        raise HTTPException(status_code=503, detail="Le jeu est actuellement hors ligne.")
-        
-    game_state = json.loads(state_json)
-    
-    # Règle A : La table doit être en phase BETTING
-    if game_state.get("phase") != "Betting":
-        raise HTTPException(
-            status_code=400, 
-            detail="Rien ne va plus ! La table est fermée pour ce tour."
-        )
-        
-    # Règle B : Le pari doit correspondre au round actuel (Anti-décalage)
-    if game_state.get("round_id") != ticket_in.round_id:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Round invalide. Le round actuel est {game_state.get('round_id')}."
-        )
 
-    # Règle C : Validation min/max mise selon les paramètres dynamiques
-    min_stake = 1
-    max_stake = 10_000_000
-    try:
-        settings_raw = await redis_client.get("roulette:settings")
-        if settings_raw:
-            s = json.loads(settings_raw)
-            min_stake = int(s.get("min_stake", min_stake))
-            max_stake = int(s.get("max_stake", max_stake))
-    except Exception:
-        pass
+    if ticket_in.game_id.startswith("KENO"):
+        # --- Keno betting-window gate ---
+        # The engine publishes `keno:current_state` (JSON) on every phase change.
+        # We require phase == 'idle' (the only phase where bets are accepted per
+        # plan §2.1) and a matching drawId / round_id.
+        keno_state_json = await redis_client.get("keno:current_state")
+        if not keno_state_json:
+            raise HTTPException(status_code=503, detail="Le jeu Keno est actuellement hors ligne.")
 
-    for bet in ticket_in.bets:
-        if bet.amount < min_stake:
-            raise HTTPException(status_code=400, detail=f"Mise trop faible. Minimum : {min_stake} XAF.")
-        if bet.amount > max_stake:
-            raise HTTPException(status_code=400, detail=f"Mise trop elevee. Maximum : {max_stake} XAF.")
+        keno_state = json.loads(keno_state_json)
+
+        # Règle A : la fenêtre de mise Keno est la phase 'idle'
+        if keno_state.get("phase") != "idle":
+            raise HTTPException(
+                status_code=400,
+                detail="Rien ne va plus ! Les mises Keno sont fermées pour ce tirage.",
+            )
+
+        # Règle B : le round_id doit correspondre au drawId courant (anti-décalage).
+        # Le moteur sérialise la clé en snake_case (`draw_id`) dans keno:current_state.
+        current_draw_id = str(keno_state.get("draw_id", ""))
+        if current_draw_id != ticket_in.round_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tirage invalide. Le tirage actuel est {current_draw_id}.",
+            )
+
+        # Règle C : min/max stake via Keno settings endpoint
+        keno_min_stake = 1
+        keno_max_stake = 10_000_000
+        try:
+            keno_settings_url = f"{KENO_SETTINGS_URL}/settings/public"
+            resp = await http_client.get(keno_settings_url, timeout=3.0)
+            if resp.status_code == 200:
+                ks = resp.json()
+                keno_min_stake = int(ks.get("min_stake", keno_min_stake))
+                keno_max_stake = int(ks.get("max_stake", keno_max_stake))
+        except Exception:
+            # Settings service unavailable: fall back to defaults, do not block the sale.
+            pass
+
+        for bet in ticket_in.bets:
+            if bet.amount < keno_min_stake:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Mise Keno trop faible. Minimum : {keno_min_stake} XAF.",
+                )
+            if bet.amount > keno_max_stake:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Mise Keno trop élevée. Maximum : {keno_max_stake} XAF.",
+                )
+
+    else:
+        # --- Roulette (and any other non-Keno game) betting-window gate ---
+        # This block is byte-identical in behaviour to the original code.
+        state_json = await redis_client.get("roulette:current_state")
+        if not state_json:
+            raise HTTPException(status_code=503, detail="Le jeu est actuellement hors ligne.")
+
+        game_state = json.loads(state_json)
+
+        # Règle A : La table doit être en phase BETTING
+        if game_state.get("phase") != "Betting":
+            raise HTTPException(
+                status_code=400,
+                detail="Rien ne va plus ! La table est fermée pour ce tour.",
+            )
+
+        # Règle B : Le pari doit correspondre au round actuel (Anti-décalage)
+        if game_state.get("round_id") != ticket_in.round_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Round invalide. Le round actuel est {game_state.get('round_id')}.",
+            )
+
+        # Règle C : Validation min/max mise selon les paramètres dynamiques
+        min_stake = 1
+        max_stake = 10_000_000
+        try:
+            settings_raw = await redis_client.get("roulette:settings")
+            if settings_raw:
+                s = json.loads(settings_raw)
+                min_stake = int(s.get("min_stake", min_stake))
+                max_stake = int(s.get("max_stake", max_stake))
+        except Exception:
+            pass
+
+        for bet in ticket_in.bets:
+            if bet.amount < min_stake:
+                raise HTTPException(status_code=400, detail=f"Mise trop faible. Minimum : {min_stake} XAF.")
+            if bet.amount > max_stake:
+                raise HTTPException(status_code=400, detail=f"Mise trop elevee. Maximum : {max_stake} XAF.")
 
     # 1. Calcul de la mise totale du ticket
     total_wager = sum(bet.amount for bet in ticket_in.bets)
@@ -519,15 +674,47 @@ async def create_ticket(
             logger.error(f"REPLAY_PLAN_CREATE_FAIL code={short_code} error={e}")
             raise HTTPException(status_code=500, detail="Erreur creation plan re-jeu.")
 
-    # 6. Hook jackpot : alimentation des pots eligibles + detection HIT.
-    #    Toute exception ici declenche un rollback complet (vente + contribs)
-    #    pour rester coherent avec l'argent debite cote caisse.
+    # 6. Jackpot contribution — delegated to jackpot-service (fail-open).
+    #    POST /internal/contribute returns {touched_pots, hits}. If the service
+    #    is unreachable or errors, we log a warning and let the sale proceed
+    #    with no hit (the ticket is still committed as PENDING/valid).
+    hits: list[dict] = []
+    touched_pots: list[dict] = []
     try:
-        hits, touched_pots = await jackpot_services.contribute_for_ticket(db, new_ticket)
+        jp_resp = await http_client.post(
+            f"{JACKPOT_SERVICE_URL}/internal/contribute",
+            json={
+                "ticket_id": str(new_ticket.id),
+                "game_id": new_ticket.game_id,
+                "kiosk_code": kiosk_code,
+                "agent_id": str(ticket_in.agent_id),
+                "wager": int(total_wager),
+            },
+            headers={"x-internal-key": JACKPOT_INTERNAL_API_KEY},
+            timeout=5.0,
+        )
+        jp_resp.raise_for_status()
+        jp_data = jp_resp.json()
+        hits = jp_data.get("hits") or []
+        touched_pots = jp_data.get("touched_pots") or []
     except Exception as e:
-        await db.rollback()
-        logger.error(f"TICKET_CREATE_JACKPOT_FAIL code={short_code} error={e}")
-        raise HTTPException(status_code=500, detail="Erreur jackpot lors de la creation du ticket.")
+        logger.warning(
+            f"JACKPOT_CONTRIBUTE_FAIL code={short_code} agent={ticket_in.agent_id} "
+            f"error={e} — sale proceeds without jackpot contribution"
+        )
+
+    # Award jackpot HIT(s): add each payout to this ticket's total and mark WON.
+    # The response shape from jackpot-service: each hit has {pot_id, scope, tier,
+    # game_id, payout, winner_ticket_id, winner_agent_id, cycle_number}.
+    # We only act on hits where winner_ticket_id == new_ticket.id (i.e. this
+    # ticket is the winner). The payout is added to total_payout and status set
+    # to WON — matching exactly what the old _process_hit() did locally.
+    for h in hits:
+        if str(h.get("winner_ticket_id", "")) == str(new_ticket.id):
+            payout = int(h.get("payout", 0))
+            new_ticket.total_payout = (new_ticket.total_payout or 0) + payout
+            if new_ticket.status == TicketStatus.PENDING:
+                new_ticket.status = TicketStatus.WON
 
     # 7. Finalisation
     await db.commit()
@@ -548,18 +735,18 @@ async def create_ticket(
         await publish_admin_event("jackpot_progress", {"pots": touched_pots})
     for h in hits:
         await publish_admin_event("jackpot_hit", {
-            "pot_id": str(h.pot.id),
-            "scope": h.pot.scope.value if hasattr(h.pot.scope, "value") else str(h.pot.scope),
-            "tier": (h.pot.tier.value if h.pot.tier and hasattr(h.pot.tier, "value") else (h.pot.tier if h.pot.tier else None)),
+            "pot_id": str(h.get("pot_id", "")),
+            "scope": h.get("scope"),
+            "tier": h.get("tier"),
             "trigger_ticket": short_code,
-            "winner_ticket_id": str(h.winner_ticket_id),
-            "winner_agent_id": str(h.winner_agent_id),
-            "payout": int(h.payout),
+            "winner_ticket_id": str(h.get("winner_ticket_id", "")),
+            "winner_agent_id": str(h.get("winner_agent_id", "")),
+            "payout": int(h.get("payout", 0)),
         })
     for h in hits:
         logger.info(
-            f"JACKPOT_HIT_ON_CREATE pot={h.pot.id} ticket_winner={h.winner_ticket_id} "
-            f"payout={h.payout} trigger_ticket={new_ticket.short_code}"
+            f"JACKPOT_HIT_ON_CREATE pot={h.get('pot_id')} ticket_winner={h.get('winner_ticket_id')} "
+            f"payout={h.get('payout')} trigger_ticket={new_ticket.short_code}"
         )
 
     # Recharge avec relations (bets) pour la réponse JSON (INDISPENSABLE en async)
@@ -679,13 +866,13 @@ async def cancel_ticket(
     db: AsyncSession = Depends(get_db),
     agent_id: str = Depends(get_current_agent_id),
 ):
-    """Annule un ticket : rollback des contributions jackpot + remboursement caisse.
+    """Annule un ticket PENDING et rembourse la caisse.
 
     Refuse si:
       - ticket inexistant
-      - ticket deja PAID/CANCELLED/LOST
-      - ticket deja en WON (un gain a ete attache, le rollback contributions risque
-        d'etre incoherent avec la prime jackpot eventuelle)
+      - ticket deja PAID/CANCELLED/LOST/WON
+    Note: jackpot contributions are now owned by jackpot-service; no local
+    rollback is performed here.
     """
     result = await db.execute(select(Ticket).where(Ticket.short_code == short_code))
     ticket = result.scalars().first()
@@ -699,17 +886,7 @@ async def cancel_ticket(
             detail=f"Annulation impossible (statut: {ticket.status.value}).",
         )
 
-    # 1. Rollback contributions jackpot (refuse 409 si un HIT a deja eu lieu)
-    try:
-        pots_touched = await jackpot_services.rollback_for_ticket(db, ticket.id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"TICKET_CANCEL_JACKPOT_FAIL code={short_code} error={e}")
-        raise HTTPException(status_code=500, detail="Erreur jackpot lors de l'annulation.")
-
-    # 2. Remboursement de la caisse caissier
+    # 1. Remboursement de la caisse caissier
     agent_base = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8000")
     agent_url = f"{agent_base}/{ticket.agent_id}/provision"
     admin_key = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
@@ -732,19 +909,17 @@ async def cancel_ticket(
         logger.error(f"TICKET_CANCEL_REVERSAL_FAIL code={short_code} error={e}")
         raise HTTPException(status_code=503, detail="Erreur lors du remboursement de la caisse.")
 
-    # 3. Statut final
+    # 2. Statut final
     ticket.status = TicketStatus.CANCELLED
     await db.commit()
 
     logger.info(
-        f"TICKET_CANCELLED code={short_code} agent={ticket.agent_id} wager={ticket.total_wager} "
-        f"pots_rolled_back={pots_touched}"
+        f"TICKET_CANCELLED code={short_code} agent={ticket.agent_id} wager={ticket.total_wager}"
     )
 
     return {
         "status": "success",
         "message": f"Ticket {short_code} annule, {ticket.total_wager} XAF retournes a la caisse.",
-        "pots_rolled_back": pots_touched,
     }
 
 

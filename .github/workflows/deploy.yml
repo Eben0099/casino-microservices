@@ -23,6 +23,8 @@ jobs:
         service:
           - agent-service
           - game-roulette-service
+          - game-keno-service
+          - jackpot-service
           - ticket-service
           - backoffice
           - agent-web

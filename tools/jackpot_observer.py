@@ -41,7 +41,7 @@ import websockets
 # and infrastructure/ecs.tf, so the defaults usually just work.
 JWT_SECRET = "MonSuperSecretCasino2026!NePasPartager"
 ADMIN_KEY = "CleSuperSecreteBackoffice2026"
-ROULETTE_GAME_ID = "11111111-1111-1111-1111-111111111111"
+ROULETTE_GAME_ID = "ROULETTE-TBL1"
 
 # Lightweight realistic bet set — enough to vary the wager without depending
 # on the heavy realistic_simulator module.

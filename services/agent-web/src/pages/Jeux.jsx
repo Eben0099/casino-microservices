@@ -6,7 +6,7 @@ import { ticketApi } from '../api/endpoints';
 import { useT } from '../i18n';
 import BettingGrid from '../components/BettingGrid';
 import BetSlip from '../components/BetSlip';
-import GameTile from '../components/GameTile';
+import GamesSidebar from '../components/GamesSidebar';
 import TicketReceipt from '../components/TicketReceipt';
 import OddsTable from '../components/OddsTable';
 import TicketVerifier from '../components/TicketVerifier';
@@ -15,14 +15,6 @@ import JackpotHitOverlay from '../components/JackpotHitOverlay';
 import { useKioskJackpots } from '../hooks/useKioskJackpots';
 
 const STAKE_PRESETS = [100, 200, 500, 1000, 2000, 5000, 10000];
-
-const GAMES = [
-  { code: 'SW', label: 'Spin & Win', active: true,  available: true  },
-  { code: 'VK', label: 'VolKeno',    active: false, available: false },
-  { code: 'S3', label: 'Super 3',    active: false, available: false },
-  { code: 'CR', label: 'Crash',      active: false, available: false },
-  { code: 'LO', label: 'Loto',       active: false, available: false },
-];
 
 const PHASE_COLOR = {
   Betting:     'var(--accent)',
@@ -158,10 +150,8 @@ export const Jeux = () => {
       <JackpotsBar pots={jackpotPots} />
 
     <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(108px, 116px) minmax(200px, 230px) 1fr minmax(290px, 340px)' }}>
-      {/* LEFT — Game tiles */}
-      <aside style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {GAMES.map((g) => <GameTile key={g.code} {...g} />)}
-      </aside>
+      {/* LEFT — Game switcher (shared, route-aware) */}
+      <GamesSidebar />
 
       {/* ODDS TABLE */}
       <aside>

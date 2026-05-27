@@ -36,9 +36,11 @@ export const ticketApi = {
         replayRounds: data.replay_rounds ?? 1,
         gameCode: data.game_code,
         // Cyclic AGD needs the engine round_id for anti-décalage validation.
-        // Standalone ignores it (its ticket-service reads the current round
-        // from Redis directly).
+        // Standalone's ticket-service also requires agent_id/game_id/round_id
+        // on TicketCreate, so forward them all through to the adapter.
         roundId: data.round_id,
+        agentId: data.agent_id,
+        gameId: data.game_id,
       })
       .then((t) => ({ data: t, normalized: t })),
 

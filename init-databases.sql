@@ -3,3 +3,5 @@
 
 CREATE DATABASE casino_ticket_db;
 CREATE DATABASE casino_roulette_db;
+CREATE DATABASE casino_keno_db;
+CREATE DATABASE casino_jackpot_db;

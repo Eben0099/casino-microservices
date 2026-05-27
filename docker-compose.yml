@@ -113,6 +113,8 @@ services:
       - JWT_SECRET=MonSuperSecretCasino2026!NePasPartager
       - ADMIN_API_KEY=CleSuperSecreteBackoffice2026
       - ROOT_PATH=/api/tickets
+      - JACKPOT_SERVICE_URL=http://jackpot-service:8000
+      - JACKPOT_INTERNAL_API_KEY=DevJackpotInternal2026
     volumes:
       - ./services/ticket-service:/app
     labels:
@@ -139,11 +141,61 @@ services:
       - REDIS_URL=redis://casino_redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://casino_admin:super_secret_password@postgres:5432/casino_roulette_db
       - AGENT_SERVICE_URL=http://agent-service:8000
+      - JACKPOT_SERVICE_URL=http://jackpot-service:8000
     volumes:
       - ./services/game-roulette-service:/app
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.roulette.loadbalancer.server.port=8000"
+
+  # --------------------------------------------------------
+  # 6b. Moteur de Keno (State Machine + Redis)
+  # --------------------------------------------------------
+  game-keno-service:
+    build:
+      context: ./services/game-keno-service
+    container_name: casino_keno_engine
+    command: sh -c "sleep 10 && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - casino_network
+    environment:
+      - REDIS_URL=redis://casino_redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://casino_admin:super_secret_password@postgres:5432/casino_keno_db
+      - AGENT_SERVICE_URL=http://agent-service:8000
+      - JACKPOT_SERVICE_URL=http://jackpot-service:8000
+    volumes:
+      - ./services/game-keno-service:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.keno.loadbalancer.server.port=8000"
+
+  # --------------------------------------------------------
+  # 6c. Service Jackpot (source de vérité unique des pots)
+  # --------------------------------------------------------
+  jackpot-service:
+    build:
+      context: ./services/jackpot-service
+    container_name: casino_jackpot
+    command: sh -c "sleep 10 && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - casino_network
+    environment:
+      - REDIS_URL=redis://casino_redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://casino_admin:super_secret_password@postgres:5432/casino_jackpot_db
+      - AGENT_SERVICE_URL=http://agent-service:8000
+      - ADMIN_API_KEY=CleSuperSecreteBackoffice2026
+      - JACKPOT_INTERNAL_API_KEY=DevJackpotInternal2026
+    volumes:
+      - ./services/jackpot-service:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.jackpot.loadbalancer.server.port=8000"
 
   # --------------------------------------------------------
   # 7. Interface d'Administration : Backoffice (React)

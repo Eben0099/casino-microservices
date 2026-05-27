@@ -1,6 +1,6 @@
 import uuid
 import enum
-from sqlalchemy import Column, String, BigInteger, DateTime, ForeignKey, Enum, Boolean
+from sqlalchemy import Column, String, BigInteger, DateTime, ForeignKey, Enum, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -33,6 +33,10 @@ class Ticket(Base):
     # agents (qui vit dans la DB d'un autre service). NULL = agent sans kiosk
     # ou lookup en echec (le ticket n'alimentera alors que les pots globaux).
     kiosk_code = Column(String(4), nullable=True, index=True)
+    # Keno only: the 20 drawn numbers for this ticket's round. NULL = unsettled.
+    # Used as the "settled" guard in process_keno_settlement (mirrors the role
+    # that winning_number plays for roulette). Populated at settlement time.
+    drawn_numbers = Column(JSON, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -59,7 +63,5 @@ class TicketBet(Base):
     ticket = relationship("Ticket", back_populates="bets")
 
 
-# Enregistre les modeles jackpot sur la meme Base pour qu'Alembic les detecte.
-from .jackpot import models as _jackpot_models  # noqa: F401, E402
-# Idem pour le module replay (plans de ticket recurrents).
+# Enregistre les modeles replay sur la meme Base pour qu'Alembic les detecte.
 from .replay import models as _replay_models  # noqa: F401, E402

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Settings, Globe, Shield, Bell, Save, Eye, EyeOff, Copy, LogOut, CheckCircle2, AlertTriangle, Power, Clock, Wallet, Percent } from 'lucide-react';
+import { Settings, Globe, Shield, Bell, Save, Eye, EyeOff, Copy, LogOut, CheckCircle2, AlertTriangle, Power, Clock, Wallet, Percent, Hash } from 'lucide-react';
 
 const TABS = [
-  { id: 'general', label: 'General', icon: Globe },
-  { id: 'roulette', label: 'Roulette', icon: Settings },
-  { id: 'securite', label: 'Securite', icon: Shield },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
+  { id: 'general',       label: 'General',       icon: Globe },
+  { id: 'roulette',      label: 'Roulette',       icon: Settings },
+  { id: 'keno',          label: 'Keno',           icon: Hash },
+  { id: 'securite',      label: 'Securite',       icon: Shield },
+  { id: 'notifications', label: 'Notifications',  icon: Bell },
 ];
 
 const Toast = ({ kind, msg }) => {
@@ -223,6 +224,135 @@ function RouletteTab({ notify }) {
   );
 }
 
+// ===== KENO TAB =====
+function KenoTab({ notify }) {
+  const adminKey = localStorage.getItem('admin_key');
+  const headers = { 'x-api-key': adminKey };
+  const [s, setS] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    try {
+      const r = await axios.get('/api/keno/admin/settings', { headers });
+      setS(r.data);
+    } catch (err) {
+      notify('err', 'Erreur de chargement des parametres Keno');
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await axios.patch('/api/keno/admin/settings', s, { headers });
+      setS(r.data);
+      notify('ok', 'Parametres Keno mis a jour. Effet au prochain tour.');
+    } catch (err) {
+      notify('err', err.response?.data?.detail || 'Erreur de sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!s) return <Card title="Keno"><p className="text-sm" style={{ color: 'var(--text-muted)' }}>Chargement...</p></Card>;
+
+  const Update = (k) => (e) => setS({ ...s, [k]: e.target.value === '' ? '' : Number(e.target.value) });
+  const UpdateBool = (k) => () => setS({ ...s, [k]: !s[k] });
+
+  return (
+    <div className="space-y-4">
+      <Card title="Etat du jeu" desc="Activation/desactivation rapide du moteur Keno (VOLKENO)">
+        <div className="flex items-center justify-between p-4 rounded-lg" style={{ background: 'var(--bg-elevated)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center"
+              style={{ background: s.enabled ? 'var(--green)20' : 'var(--red)20', color: s.enabled ? 'var(--green)' : 'var(--red)' }}>
+              <Power size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {s.enabled ? 'Keno actif' : 'Keno en maintenance'}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {s.enabled ? 'Les agents peuvent prendre des tickets Keno' : 'Les tickets sont bloques, le moteur attend la reactivation'}
+              </p>
+            </div>
+          </div>
+          <button onClick={UpdateBool('enabled')}
+            className="relative w-14 h-7 rounded-full transition-colors"
+            style={{ background: s.enabled ? 'var(--green)' : 'var(--border-strong)' }}>
+            <div className="absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform"
+              style={{ transform: s.enabled ? 'translateX(28px)' : 'translateX(2px)' }} />
+          </button>
+        </div>
+      </Card>
+
+      <Card title="Durees des phases" desc="Rythme du jeu (en secondes). Effet au prochain tour. Idle = fenetre de mises.">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            ['idle_duration',       'Mises (idle)',    '5-300'],
+            ['prelaunch_duration',  'Pre-lancement',   '1-30'],
+            ['draw_duration',       'Tirage',          '10-120'],
+            ['results_duration',    'Resultats',       '1-60'],
+          ].map(([k, label, range]) => (
+            <Field key={k} label={label} hint={`${range}s`}>
+              <div className="relative">
+                <Clock size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                <input type="number" className={`${inputCls} pl-9 w-full`} style={inputStyle}
+                  value={s[k]} onChange={Update(k)} />
+              </div>
+            </Field>
+          ))}
+        </div>
+      </Card>
+
+      <Card title="Limites de mise" desc="Plage autorisee par ticket Keno individuel (en XAF)">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <Field label="Mise minimum" hint="Montant minimum par ticket">
+            <div className="relative">
+              <Wallet size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+              <input type="number" className={`${inputCls} pl-9 w-full`} style={inputStyle}
+                value={s.min_stake} onChange={Update('min_stake')} />
+            </div>
+          </Field>
+          <Field label="Mise maximum" hint="Plafond pour limiter l'exposition">
+            <div className="relative">
+              <Wallet size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+              <input type="number" className={`${inputCls} pl-9 w-full`} style={inputStyle}
+                value={s.max_stake} onChange={Update('max_stake')} />
+            </div>
+          </Field>
+        </div>
+      </Card>
+
+      <Card title="Spots par defaut" desc="Nombre de numeros pre-selectionnes a l'ouverture de la grille (1-10)">
+        <Field label="Spots par defaut" hint="1 a 10 numeros">
+          <div className="relative max-w-xs">
+            <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+            <input type="number" min="1" max="10" className={`${inputCls} pl-9 w-full`} style={inputStyle}
+              value={s.default_spots} onChange={Update('default_spots')} />
+          </div>
+        </Field>
+      </Card>
+
+      <Card title="Commission" desc="Marge maison (informative — n'affecte pas la table des gains Keno)">
+        <Field label="Commission" hint="0 a 50%">
+          <div className="relative max-w-xs">
+            <Percent size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+            <input type="number" step="0.1" className={`${inputCls} pl-9 w-full`} style={inputStyle}
+              value={s.commission_pct} onChange={Update('commission_pct')} />
+          </div>
+        </Field>
+      </Card>
+
+      <div className="flex justify-end gap-2">
+        <SecondaryBtn onClick={load}>Annuler</SecondaryBtn>
+        <PrimaryBtn onClick={save} disabled={saving} icon={Save}>{saving ? 'Sauvegarde...' : 'Enregistrer'}</PrimaryBtn>
+      </div>
+    </div>
+  );
+}
+
 // ===== SECURITE TAB =====
 function SecuriteTab({ notify }) {
   const [show, setShow] = useState(false);
@@ -327,9 +457,10 @@ function Parametres() {
         })}
       </div>
 
-      {tab === 'general' && <GeneralTab notify={notify} />}
-      {tab === 'roulette' && <RouletteTab notify={notify} />}
-      {tab === 'securite' && <SecuriteTab notify={notify} />}
+      {tab === 'general'       && <GeneralTab notify={notify} />}
+      {tab === 'roulette'      && <RouletteTab notify={notify} />}
+      {tab === 'keno'          && <KenoTab notify={notify} />}
+      {tab === 'securite'      && <SecuriteTab notify={notify} />}
       {tab === 'notifications' && <NotificationsTab />}
 
       <Toast {...toast} />

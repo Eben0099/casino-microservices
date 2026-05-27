@@ -23,6 +23,18 @@ http:
       entryPoints: [web]
       priority: 100
 
+    keno:
+      rule: "PathPrefix(`/api/keno`) || PathPrefix(`/ws/keno`) || PathPrefix(`/ws/volkeno`)"
+      service: keno
+      entryPoints: [web]
+      priority: 100
+
+    jackpot:
+      rule: "PathPrefix(`/api/jackpots`)"
+      service: jackpot
+      entryPoints: [web]
+      priority: 100
+
     agent-web:
       rule: "PathPrefix(`/agents/pos`)"
       service: agent-web
@@ -50,6 +62,16 @@ http:
       loadBalancer:
         servers:
           - url: "http://game-roulette-service:8000"
+
+    keno:
+      loadBalancer:
+        servers:
+          - url: "http://game-keno-service:8000"
+
+    jackpot:
+      loadBalancer:
+        servers:
+          - url: "http://jackpot-service:8000"
 
     agent-web:
       loadBalancer:

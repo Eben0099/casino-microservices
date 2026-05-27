@@ -79,6 +79,8 @@ services:
       - ADMIN_API_KEY=${ADMIN_API_KEY}
       - ROOT_PATH=/api/tickets
       - AGENT_SERVICE_URL=http://agent-service:8000
+      - JACKPOT_SERVICE_URL=http://jackpot-service:8000
+      - JACKPOT_INTERNAL_API_KEY=${JACKPOT_INTERNAL_API_KEY}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ticket.entrypoints=web"
@@ -102,12 +104,61 @@ services:
       - ADMIN_API_KEY=${ADMIN_API_KEY}
       - ROOT_PATH=/api/roulette
       - AGENT_SERVICE_URL=http://agent-service:8000
+      - JACKPOT_SERVICE_URL=http://jackpot-service:8000
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.roulette.entrypoints=web"
       - "traefik.http.routers.roulette.rule=PathPrefix(`/api/roulette`) || PathPrefix(`/ws/roulette`)"
       - "traefik.http.services.roulette.loadbalancer.server.port=8000"
       - "traefik.http.routers.roulette.priority=100"
+
+  game-keno-service:
+    image: ghcr.io/${GHCR_OWNER}/casino-microservices/game-keno-service:latest
+    container_name: casino_keno_engine
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      - redis
+    networks:
+      - casino_network
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/casino_keno_db
+      - ADMIN_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      - REDIS_URL=redis://casino_redis:6379/0
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - ROOT_PATH=/api/keno
+      - AGENT_SERVICE_URL=http://agent-service:8000
+      - JACKPOT_SERVICE_URL=http://jackpot-service:8000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keno.entrypoints=web"
+      - "traefik.http.routers.keno.rule=PathPrefix(`/api/keno`) || PathPrefix(`/ws/keno`) || PathPrefix(`/ws/volkeno`)"
+      - "traefik.http.services.keno.loadbalancer.server.port=8000"
+      - "traefik.http.routers.keno.priority=100"
+
+  jackpot-service:
+    image: ghcr.io/${GHCR_OWNER}/casino-microservices/jackpot-service:latest
+    container_name: casino_jackpot
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      - redis
+    networks:
+      - casino_network
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/casino_jackpot_db
+      - ADMIN_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      - REDIS_URL=redis://casino_redis:6379/0
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - JACKPOT_INTERNAL_API_KEY=${JACKPOT_INTERNAL_API_KEY}
+      - ROOT_PATH=/api/jackpots
+      - AGENT_SERVICE_URL=http://agent-service:8000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jackpot.entrypoints=web"
+      - "traefik.http.routers.jackpot.rule=PathPrefix(`/api/jackpots`)"
+      - "traefik.http.services.jackpot.loadbalancer.server.port=8000"
+      - "traefik.http.routers.jackpot.priority=100"
 
   backoffice-web:
     image: ghcr.io/${GHCR_OWNER}/casino-microservices/backoffice:latest

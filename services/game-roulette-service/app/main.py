@@ -15,7 +15,7 @@ from .database import engine, SessionLocal
 from .models import RouletteRound
 from .rules import get_number_properties, calculate_stats
 from .settings import load_settings, save_settings, DEFAULT_SETTINGS
-from . import jackpot_service, kiosk_validator
+from . import jackpot_client, kiosk_validator
 
 # Number of synthetic results used to populate stats on the very first boot
 # (only when Redis history is empty — never overwrites real production data).
@@ -99,16 +99,13 @@ class ConnectionManager:
     async def broadcast_jackpots(self):
         """Envoie un `jackpot_updated` à chaque kiosk avec sa propre vue.
 
-        Coûteux si beaucoup de kiosks distincts, mais simple et toujours
-        correct : chaque client reçoit un payload complet adapté à son
-        scope.
+        Fetches fresh data from jackpot-service for each distinct kiosk bucket.
+        On failure fetch_jackpots returns zeros so the broadcast is always safe.
         """
-        # On itère sur une copie de clés car certains sends peuvent déclencher
-        # un disconnect() qui modifie le dict by_kiosk.
+        # Iterate over a copy of keys: sends can trigger disconnect() which
+        # mutates by_kiosk.
         for kiosk_id in list(self.by_kiosk.keys()):
-            jackpots = await jackpot_service.get_jackpots_for_kiosk(
-                kiosk_id, redis_client
-            )
+            jackpots = await jackpot_client.fetch_jackpots(kiosk_id)
             message = {
                 "type": "jackpot_updated",
                 "serverTime": time.time(),
@@ -119,9 +116,8 @@ class ConnectionManager:
     async def send_welcome(self, websocket: WebSocket, kiosk_id: str | None = None):
         # Envoie l'état instantané du jeu + le snapshot jackpots pour que
         # les cartes header/footer soient déjà calées sur la vérité serveur.
-        jackpots = await jackpot_service.get_jackpots_for_kiosk(
-            kiosk_id, redis_client
-        )
+        # kiosk_id=None is accepted by fetch_jackpots; locals will come back 0.
+        jackpots = await jackpot_client.fetch_jackpots(kiosk_id)
         welcome_msg = {
             "type": "welcome",
             "serverTime": time.time(),
@@ -167,20 +163,15 @@ async def startup_event():
 
     if ENGINE_MODE == "on_demand":
         # On-demand mode: the engine is a pure REST RNG/persistor. No game
-        # loop, no Unity WS, no ticket-service pub/sub. The DB is still used
+        # loop, no Unity WS, no jackpot relay. The DB is still used
         # (RouletteRound persists every spin so /verify/:round_id works).
-        print("🎰 ENGINE_MODE=on_demand — skipping game_loop, WS, jackpots, RMQ relays")
+        print("ENGINE_MODE=on_demand — skipping game_loop, WS, jackpot relays")
         return
 
     # Cyclic mode (legacy / standalone): full Unity-facing engine.
-    try:
-        await jackpot_service.ensure_seeded(redis_client)
-    except Exception as e:
-        print(f"⚠️  jackpot ensure_seeded failed: {e}")
-
     asyncio.create_task(game_loop())
     asyncio.create_task(forward_admin_events())
-    asyncio.create_task(consume_jackpot_events())
+    asyncio.create_task(consume_jackpot_updated())
 
 
 async def forward_admin_events():
@@ -203,21 +194,32 @@ async def forward_admin_events():
         await manager.broadcast(payload)
 
 
-async def consume_jackpot_events():
-    """Consomme `jackpot-events` (publié par ticket-service après settlement).
+async def consume_jackpot_updated():
+    """Subscribes to `jackpot-updated` published by jackpot-service.
 
-    Shape attendue : `{"event": "ROUND_SETTLED", "round_id": "...",
-    "total_wager": <int>, "per_kiosk_wager": {"AB12": 30000, ...}}`.
+    Message shape (from jackpot-service):
+        {"game_id": "ROULETTE-TBL1" | null, "kiosk_code": "<code>" | null,
+         "pots": [...]}
 
-    On applique l'incrément (globaux + per-kiosk), puis on broadcast un
-    `jackpot_updated` à chaque kiosk avec sa vue. Simple et toujours
-    correct — chaque client se ré-ancre à la vérité serveur.
+    Routing logic:
+    - game_id is null or "GLOBAL": treat as a global change — re-broadcast
+      fresh jackpots to ALL connected kiosks.
+    - game_id == ROULETTE-TBL1 and kiosk_code is set: re-broadcast only to
+      the matching kiosk bucket (and to the None/global bucket, since those
+      clients display the general + spin2win pots too).
+    - game_id == ROULETTE-TBL1 and kiosk_code is null: re-broadcast to all
+      kiosks (a game-level pot changed — all need refreshed spin2win/general).
+    - game_id for a different game (e.g. KENO-DRAW1): ignore.
+
+    The `pots` payload from jackpot-service is intentionally ignored here;
+    we always re-fetch via fetch_jackpots() so the mapping logic is in one
+    place and kiosk-specific locals are always correct.
     """
     if not redis_client:
         return
     pubsub = redis_client.pubsub()
-    await pubsub.subscribe("jackpot-events")
-    print("💰 jackpot-events consumer attached")
+    await pubsub.subscribe("jackpot-updated")
+    print("jackpot-updated subscriber attached (jackpot-service relay)")
     async for message in pubsub.listen():
         if message["type"] != "message":
             continue
@@ -225,21 +227,32 @@ async def consume_jackpot_events():
             payload = json.loads(message["data"])
         except Exception:
             continue
-        if payload.get("event") != "ROUND_SETTLED":
-            continue
         try:
-            total_wager = int(payload.get("total_wager") or 0)
-            per_kiosk_wager = payload.get("per_kiosk_wager") or {}
-            if not isinstance(per_kiosk_wager, dict):
-                per_kiosk_wager = {}
-            await jackpot_service.apply_round_settlement(
-                redis_client, total_wager, per_kiosk_wager
-            )
-            # Push a fresh snapshot to every connected kiosk so the cards
-            # re-anchor to truth right after settlement.
-            await manager.broadcast_jackpots()
-        except Exception as e:
-            print(f"⚠️  jackpot settlement failed: {e}")
+            game_id = payload.get("game_id") or None
+            kiosk_code = payload.get("kiosk_code") or None
+
+            # Determine broadcast scope.
+            if game_id is None or game_id == "GLOBAL":
+                # Global pot change — push fresh snapshot to every kiosk.
+                await manager.broadcast_jackpots()
+            elif game_id == "ROULETTE-TBL1":
+                if kiosk_code:
+                    # Kiosk-scoped update: refresh just that bucket plus the
+                    # None bucket (global-only clients whose general/spin2win
+                    # may have changed too).
+                    for kid in (kiosk_code, None):
+                        jackpots = await jackpot_client.fetch_jackpots(kid)
+                        await manager.broadcast_to_kiosk(kid, {
+                            "type": "jackpot_updated",
+                            "serverTime": time.time(),
+                            "jackpots": jackpots,
+                        })
+                else:
+                    # Game-level pot changed — all kiosks need a refresh.
+                    await manager.broadcast_jackpots()
+            # else: message is for a different game (e.g. KENO-DRAW1) — ignore.
+        except Exception as exc:
+            print(f"jackpot-updated handler error: {exc}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -423,14 +436,14 @@ async def game_loop():
                 await redis_client.publish("roulette-events", json.dumps(stats_updated_payload))
 
             # --- JACKPOT_UPDATED ---
-            # Snapshot courant pour respecter l'ordre du protocole :
+            # Per-round fallback broadcast: respects protocol ordering
             # stats_updated → jackpot_updated → phase_changed(Result).
-            # Le consumer Redis (consume_jackpot_events) republiera juste
-            # après dès que ticket-service aura settlé le round.
+            # Live updates from jackpot-service arrive independently via
+            # consume_jackpot_updated() which subscribes to jackpot-updated.
             try:
                 await manager.broadcast_jackpots()
             except Exception as e:
-                print(f"⚠️  broadcast_jackpots failed: {e}")
+                print(f"broadcast_jackpots failed: {e}")
 
             # ==========================================
             # ÉTAT 4 : RESULT
@@ -694,56 +707,42 @@ async def public_settings():
 
 @app.get("/jackpots")
 async def get_jackpots(kiosk_id: str | None = None):
-    """Lecture publique du dict jackpots (5 clés) pour ce kiosk.
+    """Public proxy: returns the 5-key jackpot dict sourced from jackpot-service.
 
-    Si `kiosk_id` est absent, les 3 valeurs per-kiosk valent 0
-    (fallback documenté — le client Unity tolère ce cas).
+    Keeps the same response shape as before so the existing Unity/cashier
+    frontend requires no changes.  If kiosk_id is absent the locals
+    (bronze/silver/gold) come back as 0.
     """
     kid = kiosk_id.strip() if isinstance(kiosk_id, str) and kiosk_id.strip() else None
-    jackpots = await jackpot_service.get_jackpots_for_kiosk(kid, redis_client)
+    jackpots = await jackpot_client.fetch_jackpots(kid)
     return {"jackpots": jackpots, "kiosk_id": kid}
 
 
 @app.get("/admin/jackpots/all", dependencies=[Depends(verify_admin_key)])
 async def admin_list_all_jackpots():
-    """Liste toutes les lignes de `jackpot_state`.
+    """Jackpot rule management has moved to jackpot-service.
 
-    Utilisé par le backoffice pour afficher en une vue le panneau global
-    (general/spin2win) et le tableau per-kiosk (bronze/silver/gold).
+    Use GET /api/jackpots/admin/pots instead.
     """
-    rows = await jackpot_service.list_all_jackpots()
-    return {"rows": rows}
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Jackpot administration has moved to jackpot-service. "
+            "Use GET /api/jackpots/admin/pots."
+        ),
+    )
 
 
 @app.patch("/admin/jackpots", dependencies=[Depends(verify_admin_key)])
-async def patch_jackpots(payload: dict):
-    """Override admin des valeurs/contribution_pct + broadcast immédiat.
+async def patch_jackpots():
+    """Jackpot rule management has moved to jackpot-service.
 
-    Body : `{"<name>": {"value": <long>, "contribution_pct": <float>,
-    "kiosk_id": "<id or null>"}, ...}`.
+    Use PATCH /api/jackpots/admin/pots instead.
     """
-    try:
-        affected = await jackpot_service.admin_set_jackpots(redis_client, payload)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    broadcast_global, kiosks = jackpot_service.affected_kiosks_to_broadcast_scope(
-        affected
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Jackpot administration has moved to jackpot-service. "
+            "Use PATCH /api/jackpots/admin/pots."
+        ),
     )
-
-    if broadcast_global:
-        # Une clé globale a bougé → tout le monde doit recevoir un snapshot frais.
-        await manager.broadcast_jackpots()
-    else:
-        # Seulement les kiosks impactés
-        for kid in kiosks:
-            jackpots = await jackpot_service.get_jackpots_for_kiosk(
-                kid, redis_client
-            )
-            await manager.broadcast_to_kiosk(kid, {
-                "type": "jackpot_updated",
-                "serverTime": time.time(),
-                "jackpots": jackpots,
-            })
-
-    return {"updated": affected}

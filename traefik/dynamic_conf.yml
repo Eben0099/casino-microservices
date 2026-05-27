@@ -30,6 +30,38 @@ http:
       entryPoints:
         - web
 
+    keno-api-router:
+      rule: "PathPrefix(`/api/keno`)"
+      service: keno-service
+      priority: 100
+      middlewares:
+        - keno-stripprefix
+      entryPoints:
+        - web
+
+    keno-ws-router:
+      rule: "PathPrefix(`/ws/keno`)"
+      service: keno-service
+      priority: 100
+      entryPoints:
+        - web
+
+    keno-volkeno-ws-router:
+      rule: "PathPrefix(`/ws/volkeno`)"
+      service: keno-service
+      priority: 100
+      entryPoints:
+        - web
+
+    jackpot-api-router:
+      rule: "PathPrefix(`/api/jackpots`)"
+      service: jackpot-service
+      priority: 100
+      middlewares:
+        - jackpot-stripprefix
+      entryPoints:
+        - web
+
     agent-web-router:
       rule: "PathPrefix(`/agents/pos`)"
       service: agent-web-service
@@ -54,6 +86,14 @@ http:
       stripPrefix:
         prefixes:
           - "/api/roulette"
+    keno-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/api/keno"
+    jackpot-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/api/jackpots"
 
   services:
     # URLs reference docker-compose service names (not container names) so
@@ -72,6 +112,16 @@ http:
       loadBalancer:
         servers:
           - url: "http://game-roulette-service:8000"
+
+    keno-service:
+      loadBalancer:
+        servers:
+          - url: "http://game-keno-service:8000"
+
+    jackpot-service:
+      loadBalancer:
+        servers:
+          - url: "http://jackpot-service:8000"
 
     agent-web-service:
       loadBalancer:

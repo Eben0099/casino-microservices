@@ -156,8 +156,8 @@ async def generate_replay_tickets_for_round(round_id: str) -> int:
 
     Retourne le nombre de tickets crees.
     """
-    # Import ici pour eviter les cycles
-    from ..jackpot import services as jackpot_services
+    jackpot_service_url = os.getenv("JACKPOT_SERVICE_URL", "http://jackpot-service:8000")
+    jackpot_internal_key = os.getenv("JACKPOT_INTERNAL_API_KEY", "DevJackpotInternal2026")
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -210,13 +210,36 @@ async def generate_replay_tickets_for_round(round_id: str) -> int:
                     amount=b.amount,
                 ))
 
-            # Hook jackpot : meme logique que la vente manuelle.
+            # Jackpot contribution — delegated to jackpot-service (fail-open).
+            # We must flush so child.id is available before the HTTP call.
             # Pas de debit caisse ici (deja debite au pre-paiement).
             try:
-                await jackpot_services.contribute_for_ticket(db, child)
+                async with httpx.AsyncClient(timeout=5.0) as _jp_client:
+                    jp_resp = await _jp_client.post(
+                        f"{jackpot_service_url}/internal/contribute",
+                        json={
+                            "ticket_id": str(child.id),
+                            "game_id": child.game_id,
+                            "kiosk_code": None,
+                            "agent_id": str(plan.agent_id),
+                            "wager": int(plan.total_wager_per_round),
+                        },
+                        headers={"x-internal-key": jackpot_internal_key},
+                    )
+                jp_resp.raise_for_status()
+                jp_data = jp_resp.json()
+                # Apply HIT awards if this replay ticket is the designated winner.
+                for h in (jp_data.get("hits") or []):
+                    if str(h.get("winner_ticket_id", "")) == str(child.id):
+                        payout = int(h.get("payout", 0))
+                        child.total_payout = (child.total_payout or 0) + payout
+                        if child.status == ticket_models.TicketStatus.PENDING:
+                            child.status = ticket_models.TicketStatus.WON
             except Exception as e:
-                logger.error(f"REPLAY_JACKPOT_FAIL plan={plan.id} ticket={child.short_code} error={e}")
-                # On laisse passer : le ticket est valide meme si la contribution jackpot echoue.
+                logger.warning(
+                    f"REPLAY_JACKPOT_FAIL plan={plan.id} ticket={child.short_code} error={e} "
+                    f"— ticket proceeds without jackpot contribution"
+                )
 
             # Decrement
             plan.rounds_remaining -= 1

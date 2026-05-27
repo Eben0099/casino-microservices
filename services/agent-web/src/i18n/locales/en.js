@@ -27,6 +27,11 @@ export const en = {
     Maintenance: 'Maintenance',
     connecting: 'Connecting…',
     live: 'Live',
+    // Keno phases (VOLKENO protocol)
+    idle:       'Bets open',
+    preLaunch:  'Get ready',
+    draw:       'Draw…',
+    results:    'Results',
   },
   status: {
     PENDING: 'Pending',
@@ -51,6 +56,7 @@ export const en = {
       HALF_COLOR: 'High/Low × Color',
       LINES: 'Lines',
       MIRROR: 'Mirror',
+      KENO: 'Keno',
     },
     typeShort: {
       STRAIGHT: 'Straight/Number',
@@ -67,6 +73,7 @@ export const en = {
       HALF_COLOR: 'L/H × Color',
       LINES: 'Lines',
       MIRROR: 'Mirror',
+      KENO: 'Keno',
     },
     lines: {
       bandTitle: 'LINES (6-num bands)',
@@ -259,6 +266,16 @@ export const en = {
       ticket: 'Ticket',
       dismiss: 'Continue',
     },
+  },
+  keno: {
+    title: 'VolKeno',
+    pickNumbers: 'Pick up to {n} numbers',
+    spots: 'Numbers',
+    picksCounter: '{c}/{max}',
+    addToSlip: 'Add to slip',
+    clearPicks: 'Clear',
+    drawInProgress: 'Draw in progress — bets closed',
+    drawn: 'Drawn',
   },
   intl: { locale: 'en-US' },
 };

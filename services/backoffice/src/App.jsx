@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import Agents from './pages/Agents';
 import Transactions from './pages/Transactions';
 import Roulette from './pages/Roulette';
+import Keno from './pages/Keno';
 import Jackpots from './pages/Jackpots';
 import Parametres from './pages/Parametres';
 
@@ -27,12 +28,13 @@ function App() {
 
           {/* Protected — Layout with Outlet */}
           <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/roulette" element={<Roulette />} />
-            <Route path="/jackpots" element={<Jackpots />} />
-            <Route path="/agents" element={<Agents />} />
+            <Route path="/dashboard"    element={<Dashboard />}    />
+            <Route path="/roulette"     element={<Roulette />}     />
+            <Route path="/keno"         element={<Keno />}         />
+            <Route path="/jackpots"     element={<Jackpots />}     />
+            <Route path="/agents"       element={<Agents />}       />
             <Route path="/transactions" element={<Transactions />} />
-            <Route path="/parametres" element={<Parametres />} />
+            <Route path="/parametres"   element={<Parametres />}   />
           </Route>
 
           {/* Redirections */}

@@ -27,6 +27,11 @@ export const fr = {
     Maintenance: 'Maintenance',
     connecting: 'Connexion…',
     live: 'En direct',
+    // Keno phases (VOLKENO protocol)
+    idle:       'Mises ouvertes',
+    preLaunch:  'Préparation',
+    draw:       'Tirage…',
+    results:    'Résultats',
   },
   status: {
     PENDING: 'En attente',
@@ -51,6 +56,7 @@ export const fr = {
       HALF_COLOR: 'Manque/Passe × Couleur',
       LINES: 'Lignes',
       MIRROR: 'Miroir',
+      KENO: 'Keno',
     },
     typeShort: {
       STRAIGHT: 'Straight/Number',
@@ -67,6 +73,7 @@ export const fr = {
       HALF_COLOR: 'M/P × Couleur',
       LINES: 'Lignes',
       MIRROR: 'Miroir',
+      KENO: 'Keno',
     },
     lines: {
       bandTitle: 'LIGNES (×6 num.)',
@@ -259,6 +266,16 @@ export const fr = {
       ticket: 'Ticket',
       dismiss: 'Continuer',
     },
+  },
+  keno: {
+    title: 'VolKeno',
+    pickNumbers: 'Choisir jusqu\'à {n} numéros',
+    spots: 'Numéros',
+    picksCounter: '{c}/{max}',
+    addToSlip: 'Ajouter au bordereau',
+    clearPicks: 'Effacer',
+    drawInProgress: 'Tirage en cours — mises fermées',
+    drawn: 'Tirés',
   },
   // Internal locale tag for Intl APIs (number/date/time formatting)
   intl: { locale: 'fr-FR' },

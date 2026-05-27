@@ -6,6 +6,7 @@ import { I18nProvider } from './i18n';
 import Layout from './components/Layout';
 import { Login } from './pages/Login';
 import { Jeux } from './pages/Jeux';
+import { Keno } from './pages/Keno';
 import { Ventes } from './pages/Ventes';
 import { Verify } from './pages/Verify';
 import { Shift } from './pages/Shift';
@@ -33,6 +34,7 @@ function App() {
 
               <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
                 <Route path="/jeux"   element={<Jeux />} />
+                <Route path="/keno"   element={<Keno />} />
                 <Route path="/ventes" element={<Ventes />} />
                 <Route path="/verify" element={<Verify />} />
                 <Route path="/shift"  element={<Shift />} />
