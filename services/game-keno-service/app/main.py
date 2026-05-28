@@ -95,9 +95,10 @@ class ConnectionManager:
     Provides:
     - broadcast()            → all connected clients
     - broadcast_to_kiosk()   → all clients for a specific kiosk_id
-    - broadcast_jackpots()   → send jackpot_updated to ALL kiosks (each gets
-                               its own medals view)
-    - broadcast_medals()     → send medals_updated to a single kiosk
+    - broadcast_jackpots()   → send BOTH jackpot_updated AND medals_updated
+                               to every connected kiosk (each gets its own view)
+    - broadcast_medals()     → send medals_updated to a single kiosk (kept for
+                               legacy / targeted refresh paths)
     - send_welcome()         → BACKEND.md welcome message
     """
 
@@ -144,13 +145,25 @@ class ConnectionManager:
                 self.disconnect(connection)
 
     async def broadcast_jackpots(self) -> None:
-        """Send ``jackpot_updated`` to every connected kiosk with its own view."""
+        """Send BOTH ``jackpot_updated`` and ``medals_updated`` to every connected
+        kiosk with its own view.
+
+        We fetch the jackpot-service snapshot once per kiosk and emit the two
+        events back-to-back — keeps medals fresh on every round end / every
+        contribution, including for kiosks that didn't sell the ticket.
+        """
+        now = _now_ms()
         for kiosk_id in list(self.by_kiosk.keys()):
-            jackpot, _medals = await jackpot_client.get_jackpots_for_kiosk(kiosk_id)
+            jackpot, medals = await jackpot_client.get_jackpots_for_kiosk(kiosk_id)
             await self.broadcast_to_kiosk(kiosk_id, {
                 "type": "jackpot_updated",
-                "serverTime": _now_ms(),
+                "serverTime": now,
                 "jackpot": jackpot,
+            })
+            await self.broadcast_to_kiosk(kiosk_id, {
+                "type": "medals_updated",
+                "serverTime": now,
+                "medals": medals,
             })
 
     async def broadcast_medals(self, kiosk_id: str) -> None:
@@ -480,9 +493,10 @@ async def consume_jackpot_updated() -> None:
 
     Logic:
     - game_id == GAME_ID ("KENO-DRAW1") OR game_id is null/absent (GLOBAL pot changed)
-      → re-broadcast ``jackpot_updated`` to ALL connected kiosks (each fetches its
-        own fresh snapshot from jackpot-service so generalAmount is accurate).
-    - kiosk_code present → also send ``medals_updated`` to that specific kiosk.
+      → re-broadcast BOTH ``jackpot_updated`` and ``medals_updated`` to ALL
+        connected kiosks (each fetches its own fresh snapshot from jackpot-service
+        so generalAmount, volkenoAmount and per-kiosk medals are all accurate).
+        broadcast_jackpots() now emits both events back-to-back per kiosk.
     """
     if not redis_client:
         return
@@ -499,7 +513,6 @@ async def consume_jackpot_updated() -> None:
             continue
 
         game_id = payload.get("game_id")
-        kiosk_code = payload.get("kiosk_code") or None
 
         # Only act on messages that are relevant to this engine
         relevant = (game_id is None) or (game_id == jackpot_client.GAME_ID)
@@ -507,12 +520,10 @@ async def consume_jackpot_updated() -> None:
             continue
 
         try:
-            # Re-broadcast jackpot_updated to every connected kiosk
+            # broadcast_jackpots() now emits BOTH jackpot_updated and
+            # medals_updated to every connected kiosk, so a single call
+            # keeps every kiosk in sync regardless of who triggered the event.
             await manager.broadcast_jackpots()
-
-            # If the event carries a kiosk_code, refresh that kiosk's medals too
-            if kiosk_code:
-                await manager.broadcast_medals(kiosk_code)
         except Exception as e:
             print(f"[keno] jackpot-updated relay failed: {e}")
 
