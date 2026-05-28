@@ -18,7 +18,7 @@ import JackpotHitOverlay from '../components/JackpotHitOverlay';
 // ----------------------------------------------------------------------------
 
 const STAKE_PRESETS = [100, 200, 500, 1000, 2000, 5000, 10000];
-const SPOTS_PRESETS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const SPOTS_PRESETS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
 // Phase → colour token (using CSS vars defined in global style)
 const PHASE_COLOR = {

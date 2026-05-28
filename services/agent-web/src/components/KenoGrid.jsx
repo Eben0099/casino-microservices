@@ -16,25 +16,29 @@ import { useT } from '../i18n';
  * -----
  * picks          int[]      Currently selected numbers (controlled).
  * onToggle       (n) => void  Called when the user clicks a number.
- * maxSpots       number     Maximum picks allowed (default 10, range 1..10).
+ * maxSpots       number     Maximum picks allowed (default 10, range 1..11).
  * isBettingOpen  boolean    Whether betting is currently open.
  * drawnNumbers   int[]|null Last draw result — shown as a highlight overlay.
  */
 
 // Paytable from §6.3 of the plan.  Used for the max-gain preview chip.
 // KENO_PAYTABLE[spots][matches] = multiplier (0 = no payout)
+// Paytable VOLK officielle (cf. services/ticket-service/app/keno_rules.py).
+// Tenir les deux en phase : le backend règle, le front sert juste à calculer
+// le gain max affichable dans la grille (cf. maxMultiplier).
 const KENO_PAYTABLE = [
-  [],                                            // index 0 unused
-  [0, 3],                                        // spots 1
-  [0, 0, 12],                                    // spots 2
-  [0, 0, 1, 42],                                 // spots 3
-  [0, 0, 1, 4, 120],                             // spots 4
-  [0, 0, 0, 2, 12, 800],                         // spots 5
-  [0, 0, 0, 1, 4, 70, 1600],                     // spots 6
-  [0, 0, 0, 1, 2, 20, 100, 5000],                // spots 7
-  [0, 0, 0, 0, 2, 10, 50, 1000, 10000],          // spots 8
-  [0, 0, 0, 0, 1, 5, 25, 200, 4000, 25000],      // spots 9
-  [0, 0, 0, 0, 0, 5, 20, 80, 500, 10000, 100000], // spots 10
+  [],                                                     // index 0 unused
+  [0, 3],                                                 // spots 1
+  [0, 1, 5],                                              // spots 2
+  [0, 0, 3, 25],                                          // spots 3
+  [0, 0, 1, 4, 100],                                      // spots 4
+  [0, 0, 0, 2, 20, 450],                                  // spots 5
+  [0, 0, 0, 1, 7, 50, 1600],                              // spots 6
+  [0, 0, 0, 1, 3, 20, 100, 5000],                         // spots 7
+  [0, 0, 0, 0, 2, 10, 50, 1000, 15000],                   // spots 8
+  [0, 0, 0, 0, 1, 5, 25, 200, 4000, 40000],               // spots 9
+  [2, 0, 0, 0, 1, 2, 20, 80, 500, 10000, 100000],         // spots 10
+  [2, 0, 0, 0, 0, 1, 10, 50, 250, 1500, 15000, 500000],   // spots 11
 ];
 
 /**

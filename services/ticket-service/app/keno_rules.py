@@ -5,19 +5,27 @@
 
 # ---------------------------------------------------------------------------
 # Paytable: KENO_PAYTABLE[spots][matches] = multiplier applied to bet amount.
-# Spots 1..10, matches 0..spots. Missing entries are 0-multiplier (loss).
+# Spots 1..11, matches 0..spots. Missing entries are 0-multiplier (loss).
+#
+# OFFICIAL VOLK paytable (source: paytable opérateur — images/photo_…jpeg).
+# RTP joueur ≈ 68–84 % selon spots → edge maison ≈ 16–32 % (norme industrie
+# Keno : 20–30 %). Quelques paliers consolation : 0 hits sur spots=10/11 paie
+# ×2 (le ticket "miss tout" récupère 2× la mise). Spots=12 désactivé pour
+# l'instant (le palier 12 du tableau opérateur est arithmétiquement
+# incohérent comme lu — à reconfirmer avec l'opérateur avant ajout).
 # ---------------------------------------------------------------------------
 KENO_PAYTABLE: dict[int, dict[int, int]] = {
-    1: {0: 0, 1: 3},
-    2: {0: 0, 1: 0, 2: 12},
-    3: {0: 0, 1: 0, 2: 1, 3: 42},
-    4: {0: 0, 1: 0, 2: 1, 3: 4, 4: 120},
-    5: {0: 0, 1: 0, 2: 0, 3: 2, 4: 12, 5: 800},
-    6: {0: 0, 1: 0, 2: 0, 3: 1, 4: 4, 5: 70, 6: 1600},
-    7: {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 20, 6: 100, 7: 5000},
-    8: {0: 0, 1: 0, 2: 0, 3: 0, 4: 2, 5: 10, 6: 50, 7: 1000, 8: 10000},
-    9: {0: 0, 1: 0, 2: 0, 3: 0, 4: 1, 5: 5, 6: 25, 7: 200, 8: 4000, 9: 25000},
-    10: {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 5, 6: 20, 7: 80, 8: 500, 9: 10000, 10: 100000},
+    1:  {0: 0, 1: 3},
+    2:  {0: 0, 1: 1, 2: 5},
+    3:  {0: 0, 1: 0, 2: 3, 3: 25},
+    4:  {0: 0, 1: 0, 2: 1, 3: 4, 4: 100},
+    5:  {0: 0, 1: 0, 2: 0, 3: 2, 4: 20, 5: 450},
+    6:  {0: 0, 1: 0, 2: 0, 3: 1, 4: 7, 5: 50, 6: 1600},
+    7:  {0: 0, 1: 0, 2: 0, 3: 1, 4: 3, 5: 20, 6: 100, 7: 5000},
+    8:  {0: 0, 1: 0, 2: 0, 3: 0, 4: 2, 5: 10, 6: 50, 7: 1000, 8: 15000},
+    9:  {0: 0, 1: 0, 2: 0, 3: 0, 4: 1, 5: 5, 6: 25, 7: 200, 8: 4000, 9: 40000},
+    10: {0: 2, 1: 0, 2: 0, 3: 0, 4: 1, 5: 2, 6: 20, 7: 80, 8: 500, 9: 10000, 10: 100000},
+    11: {0: 2, 1: 0, 2: 0, 3: 0, 4: 0, 5: 1, 6: 10, 7: 50, 8: 250, 9: 1500, 10: 15000, 11: 500000},
 }
 
 
@@ -50,7 +58,7 @@ def calculate_keno_payout(bet_target: str, drawn_numbers: list[int], amount: int
         return 0
 
     spots = len(picks)
-    if spots < 1 or spots > 10:
+    if spots < 1 or spots > 11:
         return 0
 
     drawn_set = set(drawn_numbers)

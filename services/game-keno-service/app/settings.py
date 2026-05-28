@@ -53,7 +53,7 @@ def coerce_settings(raw: dict) -> dict:
     out["min_stake"] = max(1, int(out["min_stake"]))
     out["max_stake"] = max(out["min_stake"], int(out["max_stake"]))
     out["commission_pct"] = max(0.0, min(50.0, float(out["commission_pct"])))
-    out["default_spots"] = max(1, min(10, int(out["default_spots"])))
+    out["default_spots"] = max(1, min(11, int(out["default_spots"])))
 
     return out
 
