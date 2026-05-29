@@ -13,10 +13,10 @@ logger = logging.getLogger("keno-settings")
 REDIS_KEY = "keno:settings"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "idle_duration": 30.0,
-    "prelaunch_duration": 2.0,
-    "draw_duration": 67.0,
-    "results_duration": 5.0,
+    "idle_duration": 150.0,
+    "prelaunch_duration": 5.0,
+    "draw_duration": 45.0,
+    "results_duration": 10.0,
     "min_stake": 100,
     "max_stake": 50000,
     "enabled": True,
