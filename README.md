@@ -831,3 +831,4 @@ docker compose exec ticket-service alembic upgrade head
 ## License
 
 Proprietary — AGDTech Bet. All rights reserved.
+
