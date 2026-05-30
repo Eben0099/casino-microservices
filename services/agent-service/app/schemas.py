@@ -10,6 +10,10 @@ class AgentCreate(BaseModel):
     kiosk_name: Optional[str] = None
     kiosk_location: Optional[str] = None
     role: AgentRole = AgentRole.AGENT
+    # Optionnel : code kiosque CHOISI (4 caractères de l'alphabet sans ambiguïté).
+    # Si absent, un code aléatoire unique est généré. Permet de fixer un code
+    # connu (ex: démo) que l'afficheur VOLKENO et la caisse partagent.
+    kiosk_code: Optional[str] = None
 
 class AgentResponse(BaseModel):
     id: UUID4

@@ -706,6 +706,57 @@ Details: [`docs/JACKPOT_SERVICE_PLAN.md`](docs/JACKPOT_SERVICE_PLAN.md).
 
 ---
 
+## Running the jackpot demo
+
+`tools/jackpot_demo.py` places KENO bets against a running stack so you can watch
+the whole jackpot lifecycle live: the **general** and **VOLKENO** jackpots and the
+**bronze / silver / gold** medals climb step-by-step across each idle window, then a
+jackpot **HIT** fires — playing the per-pot celebration overlay on the VOLKENO display
+and the cashier — and the pot amount **drops** (resets) in the backoffice.
+
+Real thresholds are 5M–50M XAF (thousands of bets). By default the script
+temporarily **lowers** the thresholds via the admin API so hits happen within
+minutes (staggered bronze → silver → gold → volkeno → general), then **restores**
+them on exit. Requires the **standalone / cyclic** keno engine (the WS
+idle→draw→results loop); bets are only accepted during `idle`.
+
+```bash
+# deps (same venv as the other simulators — see docs/simulator-guide.md)
+python3 -m venv /tmp/loadtest-venv
+/tmp/loadtest-venv/bin/pip install httpx PyJWT redis websockets
+
+# one-time: create the cashier with a kiosk code you choose, then bet
+/tmp/loadtest-venv/bin/python3 tools/jackpot_demo.py --base http://localhost \
+    --setup --phone +237600000000 --pin 123456 --kiosk-code HRS7
+```
+
+Then **log into the cashier** at `http://localhost/agents/pos` with
+`phone=+237600000000 / pin=123456`, and **point the VOLKENO display** at
+`?kiosk_id=HRS7`. Re-run without `--setup` to keep betting:
+
+```bash
+/tmp/loadtest-venv/bin/python3 tools/jackpot_demo.py --base http://localhost --kiosk-code HRS7
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--base` | required | `http(s)://<traefik-host>` (e.g. `http://localhost`) |
+| `--kiosk-code` | required | Kiosk the display/cashier use (e.g. `HRS7`) |
+| `--setup` | off | Create the cashier with the chosen `--kiosk-code` (needs `--phone`, `--pin`) |
+| `--phone` / `--pin` | — | Cashier login credentials (set by `--setup`, reused for betting) |
+| `--stake` | 50000 | XAF per ticket |
+| `--tickets-per-round` | 20 | Tickets fired per idle window (spread across it) |
+| `--hits` | 0 | Stop after N hits (0 = run forever) |
+| `--no-prime` | — | Don't lower thresholds — watch real (slow) growth |
+| `--no-restore` | — | Don't restore thresholds on exit |
+
+The celebration overlay duration is set in the backoffice → **Paramètres → Keno →
+Célébration jackpot** (`celebration_duration_ms`, default 10 s). Hits are deferred
+by the engine to the next idle phase so the overlay always lands over the stats
+dashboard. `Ctrl-C` restores thresholds. Dev/demo only — it uses the admin key.
+
+---
+
 ## Bet types (roulette)
 
 All `bet_target` values are strings.

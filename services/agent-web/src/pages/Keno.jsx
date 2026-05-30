@@ -46,6 +46,7 @@ export const Keno = () => {
     jackpot,
     medals,
     connected,
+    lastJackpotHit,
   } = useKenoWs(user?.kiosk_code);
 
   // REST jackpot poll (for JackpotsBar)
@@ -157,6 +158,27 @@ export const Keno = () => {
     }
   };
 
+  // ---- Backend jackpot_hit → win overlay -----------------------------------
+  // Fires the overlay for ANY jackpot hit visible to this kiosk (e.g. a GLOBAL
+  // hit, or a LOCAL win by another terminal at the same kiosk). The ticket-WON
+  // path below remains authoritative for "you sold the winning ticket" (it
+  // carries the real short_code), so suppress this when a local WON ticket is
+  // already on screen to avoid a double overlay.
+  useEffect(() => {
+    if (!lastJackpotHit?.hitId) return;
+    if (lastTicket?.status === 'WON') return;
+    setJackpotHit({
+      amount: lastJackpotHit.amount,
+      ticketCode: lastJackpotHit.ticketCode || undefined,
+      scope: lastJackpotHit.scope,
+      tier: lastJackpotHit.tier,
+      durationMs: lastJackpotHit.durationMs,
+    });
+    refreshJackpots();
+    // Keyed on hitId so each distinct hit fires exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastJackpotHit?.hitId]);
+
   // ---- PENDING → WON/LOST polling ------------------------------------------
   // Mirrors the polling effect from Jeux.jsx exactly.
 
@@ -197,6 +219,9 @@ export const Keno = () => {
         <JackpotHitOverlay
           amount={jackpotHit.amount}
           ticketCode={jackpotHit.ticketCode}
+          scope={jackpotHit.scope}
+          tier={jackpotHit.tier}
+          durationMs={jackpotHit.durationMs}
           onClose={() => setJackpotHit(null)}
         />
       )}

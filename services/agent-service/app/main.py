@@ -17,7 +17,28 @@ from .schemas import (
     AgentListResponse, LoginRequest, KiosqueLookupResponse,
 )
 from .security import create_access_token, get_current_agent_id, verify_admin_key
-from .kiosk_codes import generate_unique_kiosk_code
+from .kiosk_codes import (
+    generate_unique_kiosk_code,
+    normalize_kiosk_code,
+    is_kiosk_code_taken,
+)
+
+
+async def _resolve_kiosk_code(db, desired):
+    """Return a valid unique kiosk code: the CHOSEN one (validated + free) or a
+    freshly generated random one when none is supplied."""
+    if desired:
+        code = normalize_kiosk_code(desired)
+        if code is None:
+            raise HTTPException(
+                status_code=400,
+                detail="kiosk_code invalide : 4 caractères de l'alphabet "
+                       "23456789ABCDEFGHJKMNPQRSTUVWXYZ (sans 0/O/1/I/L).",
+            )
+        if await is_kiosk_code_taken(db, code):
+            raise HTTPException(status_code=409, detail=f"kiosk_code '{code}' déjà utilisé.")
+        return code
+    return await generate_unique_kiosk_code(db)
 
 app = FastAPI(
     title="AGDTech Agent & Cash Service",
@@ -160,8 +181,8 @@ async def register_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_d
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(agent_in.password.encode('utf-8'), salt).decode('utf-8')
     
-    # 3. Générer un code kiosque court unique (alias public pour Unity)
-    kiosk_code = await generate_unique_kiosk_code(db)
+    # 3. Code kiosque : choisi (validé/unique) ou généré aléatoirement.
+    kiosk_code = await _resolve_kiosk_code(db, agent_in.kiosk_code)
 
     # 4. Créer l'Agent
     new_agent = Agent(
@@ -202,8 +223,8 @@ async def create_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_db)
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(agent_in.password.encode('utf-8'), salt).decode('utf-8')
     
-    # 3. Générer un code kiosque court unique (alias public pour Unity)
-    kiosk_code = await generate_unique_kiosk_code(db)
+    # 3. Code kiosque : choisi (validé/unique) ou généré aléatoirement.
+    kiosk_code = await _resolve_kiosk_code(db, agent_in.kiosk_code)
 
     # 4. Créer l'Agent
     new_agent = Agent(

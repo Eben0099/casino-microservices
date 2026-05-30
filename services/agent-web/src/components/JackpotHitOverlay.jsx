@@ -3,18 +3,38 @@ import { Trophy, X, Sparkles, Crown } from 'lucide-react';
 import { useT } from '../i18n';
 
 /**
- * Plein-ecran modal affichee quand un ticket vendu vient de gagner un jackpot.
- * Style casino premium : confettis, shimmer dore, polices display.
+ * Plein-ecran modal affichee quand un jackpot est gagne. Style casino premium :
+ * confettis, shimmer, polices display. Le theme (couleurs + libelle) depend du
+ * pot gagne (general / volkeno / bronze / silver / or) et la duree d'affichage
+ * est pilotee par `durationMs` (reglage admin `celebration_duration_ms`).
  */
-const JackpotHitOverlay = ({ amount, ticketCode, onClose }) => {
+const POT_PALETTE = {
+  general: { label: 'JACKPOT GÉNÉRAL', accent: '#fde047', deep: '#ca8a04', glow: 'rgba(253,224,71,0.7)' },
+  volkeno: { label: 'JACKPOT VOLKENO', accent: '#fb923c', deep: '#c2410c', glow: 'rgba(249,115,22,0.7)' },
+  bronze:  { label: 'MÉDAILLE BRONZE', accent: '#d98a4e', deep: '#92400e', glow: 'rgba(180,83,9,0.6)' },
+  silver:  { label: 'MÉDAILLE ARGENT', accent: '#d7dee8', deep: '#64748b', glow: 'rgba(148,163,184,0.6)' },
+  gold:    { label: 'MÉDAILLE OR',     accent: '#fbbf24', deep: '#b45309', glow: 'rgba(245,158,11,0.7)' },
+};
+
+function potKey(scope, tier) {
+  const s = (scope || '').toUpperCase();
+  if (s === 'LOCAL') {
+    const tn = (tier || '').toUpperCase();
+    return tn === 'BRONZE' ? 'bronze' : tn === 'SILVER' ? 'silver' : 'gold';
+  }
+  return s === 'GAME' ? 'volkeno' : 'general';
+}
+
+const JackpotHitOverlay = ({ amount, ticketCode, onClose, scope, tier, durationMs = 8000 }) => {
   const { t, fmtN } = useT();
+  const theme = POT_PALETTE[potKey(scope, tier)] || POT_PALETTE.general;
 
   useEffect(() => {
-    const id = setTimeout(onClose, 8000);
+    const id = setTimeout(onClose, durationMs || 8000);
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => { clearTimeout(id); window.removeEventListener('keydown', onKey); };
-  }, [onClose]);
+  }, [onClose, durationMs]);
 
   // 36 confettis avec positions/couleurs/delays pseudo-aleatoires deterministes
   const confetti = useMemo(() => {
@@ -171,18 +191,20 @@ const JackpotHitOverlay = ({ amount, ticketCode, onClose }) => {
           {t('jackpots.hit.title')}
         </h1>
 
-        {/* Decorative gold line */}
+        {/* Decorative accent line (per-pot color) */}
         <div style={{
           width: 220, height: 2, margin: '6px auto 16px',
-          background: 'linear-gradient(90deg, transparent, #fde047 50%, transparent)',
+          background: `linear-gradient(90deg, transparent, ${theme.accent} 50%, transparent)`,
         }} />
 
+        {/* Per-pot label — which jackpot was won */}
         <p style={{
-          fontFamily: "'Outfit', sans-serif",
-          fontSize: 15, color: '#cbd5e1', margin: '0 0 28px',
-          fontWeight: 500,
+          fontFamily: "'Bebas Neue', 'Outfit', sans-serif",
+          fontSize: 22, color: theme.accent, margin: '0 0 28px',
+          fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase',
+          textShadow: `0 0 22px ${theme.glow}`,
         }}>
-          {t('jackpots.hit.subtitle')}
+          {theme.label}
         </p>
 
         {/* Montant — la star */}
@@ -204,7 +226,7 @@ const JackpotHitOverlay = ({ amount, ticketCode, onClose }) => {
             fontFamily: "'Outfit', sans-serif",
             fontSize: 76, fontWeight: 900, lineHeight: 1,
             fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em',
-            background: 'linear-gradient(180deg, #fff7c2 0%, #fde047 40%, #ca8a04 100%)',
+            background: `linear-gradient(180deg, #ffffff 0%, ${theme.accent} 45%, ${theme.deep} 100%)`,
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
             animation: 'jp-amount-glow 1.8s ease-in-out infinite',
           }}>
@@ -213,7 +235,7 @@ const JackpotHitOverlay = ({ amount, ticketCode, onClose }) => {
               fontFamily: "'Bebas Neue', sans-serif",
               fontSize: 28, marginLeft: 8, opacity: 0.85,
               letterSpacing: '0.15em',
-              WebkitTextFillColor: '#eab308',
+              WebkitTextFillColor: theme.deep,
             }}>
               XAF
             </span>
@@ -239,12 +261,12 @@ const JackpotHitOverlay = ({ amount, ticketCode, onClose }) => {
 
         <button onClick={onClose} style={{
           marginTop: 28, padding: '14px 40px', borderRadius: 12,
-          background: 'linear-gradient(135deg, #fde047, #eab308 50%, #ca8a04)',
+          background: `linear-gradient(135deg, ${theme.accent}, ${theme.deep})`,
           color: '#1a0f00', border: 'none', cursor: 'pointer',
           fontFamily: "'Bebas Neue', sans-serif",
           fontSize: 17, fontWeight: 400, letterSpacing: '0.22em',
           textTransform: 'uppercase',
-          boxShadow: '0 8px 24px rgba(253,224,71,0.4), inset 0 -3px 8px rgba(0,0,0,0.2)',
+          boxShadow: `0 8px 24px ${theme.glow}, inset 0 -3px 8px rgba(0,0,0,0.2)`,
           display: 'block', margin: '28px auto 0',
         }}>
           {t('jackpots.hit.dismiss')}

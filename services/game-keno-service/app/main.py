@@ -70,7 +70,16 @@ current_phase_state: dict = {
     "phase_started_at": 0,     # epoch ms
     "phase_duration_ms": 0,    # ms
     "drawn_numbers": None,     # list[int] or None
+    # Client win-celebration overlay duration (ms); refreshed each loop from
+    # keno:settings so admin changes apply live. Sent in welcome + jackpot_hit.
+    "celebration_duration_ms": 10000,
 }
+
+# Jackpot hits that arrived OUTSIDE the idle phase are queued here and flushed
+# at the next idle entry, so the celebration always plays while the VOLKENO
+# stats dashboard is on screen (the win/payout already happened at sale time —
+# only the on-screen celebration is timed).
+pending_hits: list[dict] = []
 
 # Latest StatsSnapshot (BACKEND.md §3) — served immediately in welcome so
 # the dashboard is never blank on reconnect.
@@ -175,6 +184,38 @@ class ConnectionManager:
             "medals": medals,
         })
 
+    async def broadcast_hit(self, payload: dict) -> None:
+        """Relay a jackpot HIT to the right displays as a one-shot ``jackpot_hit``.
+
+        GLOBAL / GAME pots are shared, so every connected display celebrates.
+        LOCAL pots are per-kiosk → only that kiosk's display fires. We stamp the
+        engine's own current ``drawId`` so the client can correlate, and
+        UPPERCASE the pot's ``kiosk_code`` to match the connection buckets (which
+        key on the uppercased ``kiosk_id`` query param — a lowercase code would
+        otherwise reach no one).
+        """
+        scope = (payload.get("scope") or "").upper()
+        frame = {
+            "type": "jackpot_hit",
+            "serverTime": _now_ms(),
+            "scope": scope,
+            "tier": payload.get("tier"),
+            "amount": payload.get("payout"),
+            "cycleNumber": payload.get("cycle_number"),
+            "hitId": payload.get("hit_id"),
+            "drawId": current_phase_state["draw_id"],
+            # Winning ticket code (so player + agent know who won); may be null.
+            "winnerTicketCode": payload.get("winner_short_code"),
+            # How long the client celebration overlay should stay up (admin-set).
+            "celebrationDurationMs": current_phase_state.get("celebration_duration_ms", 10000),
+        }
+        if scope == "LOCAL":
+            kiosk = payload.get("kiosk_code")
+            if kiosk:
+                await self.broadcast_to_kiosk(kiosk.upper(), frame)
+        else:
+            await self.broadcast(frame)
+
     async def send_welcome(
         self, websocket: WebSocket, kiosk_id: str | None = None
     ) -> None:
@@ -199,6 +240,7 @@ class ConnectionManager:
             "stats": stats_snap,
             "jackpot": jackpot,
             "medals": medals,
+            "celebrationDurationMs": current_phase_state.get("celebration_duration_ms", 10000),
         }
         try:
             await websocket.send_json(msg)
@@ -221,6 +263,7 @@ async def startup_event() -> None:
 
     asyncio.create_task(game_loop())
     asyncio.create_task(consume_jackpot_updated())
+    asyncio.create_task(consume_jackpot_hit())
 
 
 @app.on_event("shutdown")
@@ -357,6 +400,10 @@ async def game_loop() -> None:
             t_prelaunch = float(settings["prelaunch_duration"])
             t_draw = float(settings["draw_duration"])
             t_results = float(settings["results_duration"])
+            # Refresh the celebration duration so admin edits apply next cycle.
+            current_phase_state["celebration_duration_ms"] = int(
+                settings.get("celebration_duration_ms", 10000)
+            )
 
             # =================================================================
             # IDLE — betting window; drawId increments HERE
@@ -366,7 +413,27 @@ async def game_loop() -> None:
             print(f"[keno] IDLE  draw_id={draw_id} ({t_idle}s)")
 
             await _set_phase("idle", draw_id, int(t_idle * 1000))
-            await asyncio.sleep(t_idle)
+
+            # Flush any jackpot hits that landed during the previous draw/results
+            # so the celebration plays now, over the stats dashboard.
+            if pending_hits:
+                queued, pending_hits[:] = list(pending_hits), []
+                for hit in queued:
+                    try:
+                        await manager.broadcast_hit(hit)
+                    except Exception as e:
+                        print(f"[keno] deferred jackpot-hit relay failed: {e}")
+
+            # Re-broadcast the pots in ~5s slices for the whole idle window so the
+            # amounts climb smoothly (step-by-step) rather than jumping only when
+            # a contribution relay lands. Cheap: one snapshot fetch per kiosk.
+            idle_deadline = _now_ms() + int(t_idle * 1000)
+            while _now_ms() < idle_deadline:
+                await asyncio.sleep(min(5.0, max(0.5, (idle_deadline - _now_ms()) / 1000)))
+                try:
+                    await manager.broadcast_jackpots()
+                except Exception as e:
+                    print(f"[keno] idle jackpot ticker failed: {e}")
 
             # =================================================================
             # PRE-LAUNCH
@@ -526,6 +593,49 @@ async def consume_jackpot_updated() -> None:
             await manager.broadcast_jackpots()
         except Exception as e:
             print(f"[keno] jackpot-updated relay failed: {e}")
+
+
+async def consume_jackpot_hit() -> None:
+    """Subscribe to ``jackpot-hit`` (published by jackpot-service on a win) and
+    relay it to WS clients as a one-shot ``jackpot_hit`` event for the win
+    cinematic.
+
+    Message shape:
+        { "hit_id", "pot_id", "scope", "tier", "game_id", "kiosk_code",
+          "payout", "winner_ticket_id", "cycle_number" }
+
+    Filter: relay only GLOBAL pots (``game_id`` null) or this engine's game
+    (``KENO-DRAW1``). Roulette's own GAME/LOCAL hits are dropped here.
+    """
+    if not redis_client:
+        return
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("jackpot-hit")
+    print("[keno] jackpot-hit consumer attached")
+
+    async for message in pubsub.listen():
+        if message["type"] != "message":
+            continue
+        try:
+            payload = json.loads(message["data"])
+        except Exception:
+            continue
+
+        game_id = payload.get("game_id")
+        relevant = (game_id is None) or (game_id == jackpot_client.GAME_ID)
+        if not relevant:
+            continue
+
+        # The hit can fire at any phase (it's triggered at ticket sale). Only
+        # broadcast the celebration while idle (stats dashboard up); otherwise
+        # queue it and the game_loop flushes it at the next idle entry.
+        if current_phase_state.get("phase") == "idle":
+            try:
+                await manager.broadcast_hit(payload)
+            except Exception as e:
+                print(f"[keno] jackpot-hit relay failed: {e}")
+        else:
+            pending_hits.append(payload)
 
 
 # ---------------------------------------------------------------------------

@@ -306,6 +306,16 @@ function KenoTab({ notify }) {
         </div>
       </Card>
 
+      <Card title="Celebration jackpot" desc="Duree de l'animation de gain (general / volkeno / bronze / argent / or) sur l'afficheur et la caisse. Effet au prochain HIT.">
+        <Field label="Duree de celebration" hint="3000-30000 ms">
+          <div className="relative">
+            <Clock size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+            <input type="number" className={`${inputCls} pl-9 w-full`} style={inputStyle}
+              value={s.celebration_duration_ms} onChange={Update('celebration_duration_ms')} />
+          </div>
+        </Field>
+      </Card>
+
       <Card title="Limites de mise" desc="Plage autorisee par ticket Keno individuel (en XAF)">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Field label="Mise minimum" hint="Montant minimum par ticket">

@@ -3,29 +3,40 @@
 # Keno payout logic — fully isolated from roulette rules.
 # Source: docs/KENO_IMPLEMENTATION_PLAN.md §6.3
 
+from __future__ import annotations
+
+from decimal import Decimal
+
 # ---------------------------------------------------------------------------
 # Paytable: KENO_PAYTABLE[spots][matches] = multiplier applied to bet amount.
 # Spots 1..11, matches 0..spots. Missing entries are 0-multiplier (loss).
 #
-# OFFICIAL VOLK paytable (source: paytable opérateur — images/photo_…jpeg).
-# RTP joueur ≈ 68–84 % selon spots → edge maison ≈ 16–32 % (norme industrie
-# Keno : 20–30 %). Quelques paliers consolation : 0 hits sur spots=10/11 paie
-# ×2 (le ticket "miss tout" récupère 2× la mise). Spots=12 désactivé pour
-# l'instant (le palier 12 du tableau opérateur est arithmétiquement
-# incohérent comme lu — à reconfirmer avec l'opérateur avant ajout).
+# TUNED FOR 30% NET HOUSE MARGIN. Every spot count is calibrated to the SAME
+# base RTP of 68.5% so no spot-count is exploitable. "Net" means after the
+# guaranteed jackpot slice (GLOBAL 1% + KENO game 0.5% = 1.5%, deferred player
+# return): 1 − 0.685 − 0.015 = 0.30. The realized per-draw margin varies
+# (Law of Large Numbers); only the long-run expectation is 30%.
+#
+# This table is GENERATED — do not hand-edit values. To re-shape prizes, edit
+# the SHAPES in `tools/keno_paytable.py`, regenerate (`--emit-python` /
+# `--emit-js` for the agent-web mirror), and verify with
+# `python tools/keno_rtp_check.py` (and `pytest tests/test_keno_rtp.py`).
+# Multipliers are fractional for low spot counts because integer-only cannot
+# hit 68.5% there (e.g. 1 spot: 2.74×, not 3×=75%). Aspirational top prizes
+# (k>=5) are preserved exactly as the jackpot hook.
 # ---------------------------------------------------------------------------
-KENO_PAYTABLE: dict[int, dict[int, int]] = {
-    1:  {0: 0, 1: 3},
-    2:  {0: 0, 1: 1, 2: 5},
-    3:  {0: 0, 1: 0, 2: 3, 3: 25},
-    4:  {0: 0, 1: 0, 2: 1, 3: 4, 4: 100},
-    5:  {0: 0, 1: 0, 2: 0, 3: 2, 4: 20, 5: 450},
-    6:  {0: 0, 1: 0, 2: 0, 3: 1, 4: 7, 5: 50, 6: 1600},
-    7:  {0: 0, 1: 0, 2: 0, 3: 1, 4: 3, 5: 20, 6: 100, 7: 5000},
-    8:  {0: 0, 1: 0, 2: 0, 3: 0, 4: 2, 5: 10, 6: 50, 7: 1000, 8: 15000},
-    9:  {0: 0, 1: 0, 2: 0, 3: 0, 4: 1, 5: 5, 6: 25, 7: 200, 8: 4000, 9: 40000},
-    10: {0: 2, 1: 0, 2: 0, 3: 0, 4: 1, 5: 2, 6: 20, 7: 80, 8: 500, 9: 10000, 10: 100000},
-    11: {0: 2, 1: 0, 2: 0, 3: 0, 4: 0, 5: 1, 6: 10, 7: 50, 8: 250, 9: 1500, 10: 15000, 11: 500000},
+KENO_PAYTABLE: dict[int, dict[int, float]] = {
+     1: {1: 2.74},
+     2: {1: 1.01, 2: 5.03},
+     3: {2: 2.69, 3: 22.4},
+     4: {2: 0.99, 3: 3.96, 4: 99},
+     5: {3: 1.93, 4: 19.3, 5: 450},
+     6: {3: 0.99, 4: 6.92, 5: 49.4, 6: 1600},
+     7: {3: 0.97, 4: 2.92, 5: 19.5, 6: 97.5, 7: 5000},
+     8: {4: 1.98, 5: 9.92, 6: 49.6, 7: 992, 8: 15000},
+     9: {4: 0.98, 5: 4.9, 6: 24.5, 7: 196, 8: 3924, 9: 40000},
+    10: {0: 1.63, 4: 0.81, 5: 1.63, 6: 16.3, 7: 65, 8: 406, 9: 8126, 10: 100000},
+    11: {0: 1.98, 5: 0.99, 6: 9.91, 7: 49.5, 8: 248, 9: 1486, 10: 14863, 11: 500000},
 }
 
 
@@ -65,7 +76,10 @@ def calculate_keno_payout(bet_target: str, drawn_numbers: list[int], amount: int
     matches = len(set(picks) & drawn_set)
 
     multiplier = KENO_PAYTABLE.get(spots, {}).get(matches, 0)
-    return amount * multiplier
+    # Multipliers can be fractional (low spot counts). Floor the payout to a
+    # whole XAF — truncation is house-favorable and keeps net margin >= target.
+    # Decimal avoids binary-float drift (e.g. 0.81 * amount).
+    return int(Decimal(amount) * Decimal(str(multiplier)))
 
 
 def keno_medal_tier(spots: int, matches: int) -> str | None:

@@ -246,11 +246,16 @@ class HitResult:
         winner_ticket_id: str,
         winner_agent_id: str,
         payout: int,
+        winner_short_code: Optional[str] = None,
     ):
         self.pot = pot
         self.winner_ticket_id = winner_ticket_id
         self.winner_agent_id = winner_agent_id
         self.payout = payout
+        # Human-readable code of the winning ticket (shown in the celebration so
+        # the player + agent know who won). Known when the winner is the trigger
+        # ticket (TRIGGER_TICKET mode); None for a RANDOM_RECENT winner.
+        self.winner_short_code = winner_short_code
 
 
 def _compute_contribution(pot: JackpotPot, total_wager: int) -> int:
@@ -268,6 +273,7 @@ async def contribute(
     kiosk_code: Optional[str],
     agent_id: str,
     wager: int,
+    short_code: Optional[str] = None,
 ) -> Tuple[List[dict], List[HitResult]]:
     """Alimente tous les pots eligibles pour un ticket vendu.
 
@@ -353,7 +359,8 @@ async def contribute(
         # 3) HIT detection — slow path
         if new_amount >= threshold:
             hit = await _try_claim_hit(
-                db, pot.id, cycle, ticket_id=ticket_id, agent_id=agent_id
+                db, pot.id, cycle, ticket_id=ticket_id, agent_id=agent_id,
+                short_code=short_code,
             )
             if hit:
                 hits.append(hit)
@@ -379,6 +386,7 @@ async def _try_claim_hit(
     *,
     ticket_id: str,
     agent_id: str,
+    short_code: Optional[str] = None,
 ) -> Optional[HitResult]:
     """Tente de revendiquer un HIT sur ce pot pour le cycle observe.
 
@@ -397,7 +405,9 @@ async def _try_claim_hit(
         return None
     if pot.current_amount < pot.current_threshold:
         return None
-    return await _process_hit(db, pot, ticket_id=ticket_id, agent_id=agent_id)
+    return await _process_hit(
+        db, pot, ticket_id=ticket_id, agent_id=agent_id, short_code=short_code
+    )
 
 
 async def _pick_winner_ticket(
@@ -447,10 +457,15 @@ async def _process_hit(
     *,
     ticket_id: str,
     agent_id: str,
+    short_code: Optional[str] = None,
 ) -> HitResult:
     winner_ticket_id, winner_agent_id = await _pick_winner_ticket(
         db, pot, ticket_id, agent_id
     )
+    # The triggering ticket's short_code is known (passed by ticket-service).
+    # It IS the winner's code in TRIGGER_TICKET mode; for a RANDOM_RECENT winner
+    # other than the trigger we don't have the code here, so leave it None.
+    winner_short_code = short_code if winner_ticket_id == ticket_id else None
     pot_amount = pot.current_amount
 
     if pot.max_payout is not None and pot.max_payout > 0:
@@ -490,6 +505,7 @@ async def _process_hit(
         winner_ticket_id=winner_ticket_id,
         winner_agent_id=winner_agent_id,
         payout=payout,
+        winner_short_code=winner_short_code,
     )
 
 

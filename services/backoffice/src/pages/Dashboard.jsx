@@ -8,6 +8,7 @@ import { useAdminWs, useDebouncedTick } from '../hooks/useAdminWs';
 function Dashboard() {
   const [stats, setStats] = useState({ totalWager: 0, totalPayout: 0, ticketsValidated: 0, activeAgents: 0 });
   const [performance, setPerformance] = useState([]);
+  const [kenoMargin, setKenoMargin] = useState(null);
   const [loading, setLoading] = useState(true);
   const { connected, tick, lastEvent } = useAdminWs();
 
@@ -16,11 +17,12 @@ function Dashboard() {
     if (!adminKey) return;
     const config = { headers: { 'x-api-key': adminKey } };
     try {
-      const [ticketRes, agentRes, perfRes, allAgentsRes] = await Promise.all([
+      const [ticketRes, agentRes, perfRes, allAgentsRes, marginRes] = await Promise.all([
         axios.get('/api/tickets/admin/stats', config),
         axios.get('/api/agents/admin/stats', config),
         axios.get('/api/tickets/admin/agents-performance', config).catch(() => ({ data: [] })),
         axios.get('/api/agents', config).catch(() => ({ data: [] })),
+        axios.get('/api/tickets/admin/keno/margin?rounds=30', config).catch(() => ({ data: null })),
       ]);
       setStats({
         totalWager: ticketRes.data.total_wager || 0,
@@ -28,6 +30,7 @@ function Dashboard() {
         ticketsValidated: ticketRes.data.tickets_validated || 0,
         activeAgents: agentRes.data.active_agents || 0,
       });
+      setKenoMargin(marginRes.data);
       const agentsList = allAgentsRes.data || [];
       setPerformance((perfRes.data || []).map(p => {
         const agent = agentsList.find(a => String(a.id) === p.agent_id);
@@ -72,6 +75,37 @@ function Dashboard() {
         <StatCard icon={Receipt} label="Tickets Valides" value={loading ? '...' : stats.ticketsValidated.toLocaleString('fr-FR')} color="var(--blue)" />
         <StatCard icon={UserCheck} label="Caissiers Actifs" value={loading ? '...' : stats.activeAgents} color="var(--purple)" />
       </div>
+
+      {/* KENO net margin vs 30% target (last N settled rounds) */}
+      {kenoMargin && kenoMargin.rounds > 0 && (() => {
+        const net = kenoMargin.net_margin_max; // @1.5% jackpot slice
+        const onTarget = kenoMargin.on_target;
+        const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
+        const color = onTarget ? 'var(--green)' : 'var(--accent)';
+        return (
+          <div className="rounded-xl p-5 mb-8" style={{ background: 'var(--bg-surface)', border: `1px solid ${color}33`, boxShadow: 'var(--shadow-sm)' }}>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  Marge maison KENO — {kenoMargin.rounds} derniers tirages
+                </p>
+                <div className="flex items-baseline gap-3 mt-1">
+                  <span className="text-3xl font-bold" style={{ color }}>{pct(net)}</span>
+                  <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                    nette (cible 30%) · brute {pct(kenoMargin.gross_margin)} · plage {pct(kenoMargin.net_margin_min)}–{pct(kenoMargin.net_margin_max)}
+                  </span>
+                </div>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold" style={{ background: `${color}1A`, color }}>
+                {onTarget ? 'DANS LA CIBLE' : 'HORS CIBLE'}
+              </span>
+            </div>
+            <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
+              La marge par tirage varie fortement (loi des grands nombres) — seule la moyenne glissante converge vers 30%.
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Performance Table */}
       <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)' }}>

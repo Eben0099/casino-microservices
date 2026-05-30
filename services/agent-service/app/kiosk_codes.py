@@ -31,3 +31,19 @@ async def generate_unique_kiosk_code(db: AsyncSession) -> str:
     raise RuntimeError(
         f"Impossible de generer un code kiosque unique apres {MAX_TRIES} tentatives."
     )
+
+
+def normalize_kiosk_code(code: str) -> str | None:
+    """Normalise un code CHOISI ; retourne le code en majuscules s'il est valide
+    (exactement CODE_LENGTH caracteres de ALPHABET), sinon None."""
+    c = (code or "").strip().upper()
+    if len(c) != CODE_LENGTH or any(ch not in ALPHABET for ch in c):
+        return None
+    return c
+
+
+async def is_kiosk_code_taken(db: AsyncSession, code: str) -> bool:
+    existing = await db.execute(
+        select(Agent.id).where(Agent.kiosk_code == code).limit(1)
+    )
+    return existing.scalar() is not None

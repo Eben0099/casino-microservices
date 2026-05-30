@@ -343,6 +343,7 @@ async def process_keno_settlement(round_id: str, drawn_numbers: list[int]):
     total_won = 0
     total_lost = 0
     total_payout_round = 0
+    total_wager_round = 0
     offset = 0
 
     while True:
@@ -390,6 +391,7 @@ async def process_keno_settlement(round_id: str, drawn_numbers: list[int]):
                     else:
                         total_lost += 1
                     total_payout_round += int(ticket.total_payout or 0)
+                    total_wager_round += int(ticket.total_wager or 0)
                 except Exception as e:
                     logger.error(f"KENO_SETTLEMENT_ERROR ticket={ticket.short_code} error={e}")
 
@@ -419,6 +421,7 @@ async def process_keno_settlement(round_id: str, drawn_numbers: list[int]):
         "processed": total_processed,
         "won": total_won,
         "lost": total_lost,
+        "total_wager": total_wager_round,
         "total_payout": total_payout_round,
     })
 
@@ -441,6 +444,64 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
         "total_payout": total_payout,
         "tickets_validated": count_tickets
     }
+
+
+@app.get("/admin/keno/margin", dependencies=[Depends(verify_admin_key)])
+async def get_keno_margin(rounds: int = 50, db: AsyncSession = Depends(get_db)):
+    """Realized KENO house margin over the last `rounds` settled rounds.
+
+    gross margin = 1 − payout/wager (the base-game take from the paytable).
+    NET margin subtracts the jackpot slice — deferred player return, 1.5%
+    guaranteed (GLOBAL+GAME) up to 2.4% with LOCAL pots — so the company's true
+    keep sits between `net_margin_min` (@2.4%) and `net_margin_max` (@1.5%).
+    Target NET = 30%. Per-round margin swings widely by design (Law of Large
+    Numbers); only the trailing aggregate should sit near 30%.
+    """
+    rounds = max(1, min(500, rounds))
+    rows_result = await db.execute(
+        select(
+            Ticket.round_id,
+            func.sum(Ticket.total_wager).label("wager"),
+            func.sum(Ticket.total_payout).label("payout"),
+            func.count(Ticket.id).label("tickets"),
+        )
+        .where(
+            Ticket.game_id.like("KENO%"),
+            Ticket.drawn_numbers.isnot(None),  # settled rounds only
+        )
+        .group_by(Ticket.round_id)
+        .order_by(func.max(Ticket.created_at).desc())
+        .limit(rounds)
+    )
+    per_round = []
+    agg_wager = 0
+    agg_payout = 0
+    for r in rows_result.all():
+        w = int(r.wager or 0)
+        p = int(r.payout or 0)
+        agg_wager += w
+        agg_payout += p
+        per_round.append({
+            "round_id": r.round_id,
+            "wager": w,
+            "payout": p,
+            "tickets": int(r.tickets or 0),
+            "gross_margin": (1 - p / w) if w else None,
+        })
+
+    gross = (1 - agg_payout / agg_wager) if agg_wager else None
+    return {
+        "rounds": len(per_round),
+        "total_wager": agg_wager,
+        "total_payout": agg_payout,
+        "gross_margin": gross,
+        "net_margin_max": (gross - 0.015) if gross is not None else None,  # @1.5%
+        "net_margin_min": (gross - 0.024) if gross is not None else None,  # @2.4%
+        "target_net_margin": 0.30,
+        "on_target": (gross is not None and abs((gross - 0.015) - 0.30) <= 0.05),
+        "per_round": per_round,
+    }
+
 
 @app.get("/admin/agents-performance", dependencies=[Depends(verify_admin_key)])
 async def get_agents_performance(db: AsyncSession = Depends(get_db)):
@@ -692,6 +753,7 @@ async def create_ticket(
                 "kiosk_code": kiosk_code,
                 "agent_id": str(ticket_in.agent_id),
                 "wager": int(total_wager),
+                "short_code": short_code,
             },
             headers={"x-internal-key": JACKPOT_INTERNAL_API_KEY},
             timeout=5.0,

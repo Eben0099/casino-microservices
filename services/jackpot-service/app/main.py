@@ -201,6 +201,46 @@ async def _publish_update(game_id: Optional[str], kiosk_code: Optional[str], pot
         logger.warning("JACKPOT_REDIS_PUBLISH_FAILED error=%s", exc)
 
 
+async def _publish_hit(hit) -> None:
+    """Annonce un HIT de jackpot sur Redis (canal `jackpot-hit`).
+
+    Les game-engines relaient cet evenement a leurs clients WS pour declencher
+    la cinematique de gain. Best-effort ; safe a appeler apres commit car la
+    session est `expire_on_commit=False`.
+
+    `hit_id` est deterministe (`pot_id:cycle_gagnant`) — un pot ne peut gagner
+    qu'une fois par cycle — pour que chaque consommateur deduplique sans etat.
+    """
+    if redis_client is None:
+        return
+    pot = hit.pot
+    scope = pot.scope.value if hasattr(pot.scope, "value") else str(pot.scope)
+    tier = (
+        pot.tier.value
+        if pot.tier and hasattr(pot.tier, "value")
+        else (str(pot.tier) if pot.tier else None)
+    )
+    won_cycle = pot.cycle_number - 1  # cycle_number a deja ete incremente au reset
+    try:
+        await redis_client.publish(
+            "jackpot-hit",
+            json.dumps({
+                "hit_id": f"{pot.id}:{won_cycle}",
+                "pot_id": str(pot.id),
+                "scope": scope,
+                "tier": tier,
+                "game_id": pot.game_id,
+                "kiosk_code": pot.kiosk_code,
+                "payout": hit.payout,
+                "winner_ticket_id": hit.winner_ticket_id,
+                "winner_short_code": getattr(hit, "winner_short_code", None),
+                "cycle_number": won_cycle,
+            }),
+        )
+    except Exception as exc:
+        logger.warning("JACKPOT_HIT_PUBLISH_FAILED error=%s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -233,6 +273,7 @@ async def internal_contribute(
             kiosk_code=body.kiosk_code,
             agent_id=body.agent_id,
             wager=body.wager,
+            short_code=body.short_code,
         )
     except Exception as exc:
         # Fail-open : on logue mais on ne plante pas ticket-service
@@ -244,6 +285,10 @@ async def internal_contribute(
 
     # Publier jackpot-updated sur Redis (best-effort)
     await _publish_update(body.game_id, body.kiosk_code, touched)
+
+    # Annoncer chaque HIT sur le canal dedie pour les cinematiques de gain.
+    for h in hits:
+        await _publish_hit(h)
 
     logger.info(
         "JACKPOT_CONTRIBUTE ticket_id=%s game_id=%s kiosk_code=%s wager=%s pots=%s hits=%s",

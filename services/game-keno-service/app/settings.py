@@ -22,6 +22,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "enabled": True,
     "commission_pct": 0.0,
     "default_spots": 10,
+    # How long the client jackpot-win celebration overlay stays on screen (ms).
+    "celebration_duration_ms": 10000,
 }
 
 DURATION_BOUNDS: dict[str, tuple[float, float]] = {
@@ -54,6 +56,8 @@ def coerce_settings(raw: dict) -> dict:
     out["max_stake"] = max(out["min_stake"], int(out["max_stake"]))
     out["commission_pct"] = max(0.0, min(50.0, float(out["commission_pct"])))
     out["default_spots"] = max(1, min(11, int(out["default_spots"])))
+    # Kept as an int (ms); clamped to a sane 3s–30s window.
+    out["celebration_duration_ms"] = max(3000, min(30000, int(out["celebration_duration_ms"])))
 
     return out
 

@@ -21,24 +21,27 @@ import { useT } from '../i18n';
  * drawnNumbers   int[]|null Last draw result — shown as a highlight overlay.
  */
 
-// Paytable from §6.3 of the plan.  Used for the max-gain preview chip.
-// KENO_PAYTABLE[spots][matches] = multiplier (0 = no payout)
-// Paytable VOLK officielle (cf. services/ticket-service/app/keno_rules.py).
-// Tenir les deux en phase : le backend règle, le front sert juste à calculer
-// le gain max affichable dans la grille (cf. maxMultiplier).
+// KENO_PAYTABLE[spots][matches] = multiplier (0 = no payout). Display-only:
+// used for the max-gain preview chip (cf. maxMultiplier). The BACKEND
+// (services/ticket-service/app/keno_rules.py) is the source of truth for real
+// payouts — this is a GENERATED mirror, kept in phase by
+// services/ticket-service/tests/test_keno_rtp.py (drift guard).
+// To change prizes: edit tools/keno_paytable.py SHAPES, then
+// `python tools/keno_paytable.py --emit-js` and paste here.
+// Tuned for 30% NET house margin (every spot count ≈68.5% base RTP).
 const KENO_PAYTABLE = [
-  [],                                                     // index 0 unused
-  [0, 3],                                                 // spots 1
-  [0, 1, 5],                                              // spots 2
-  [0, 0, 3, 25],                                          // spots 3
-  [0, 0, 1, 4, 100],                                      // spots 4
-  [0, 0, 0, 2, 20, 450],                                  // spots 5
-  [0, 0, 0, 1, 7, 50, 1600],                              // spots 6
-  [0, 0, 0, 1, 3, 20, 100, 5000],                         // spots 7
-  [0, 0, 0, 0, 2, 10, 50, 1000, 15000],                   // spots 8
-  [0, 0, 0, 0, 1, 5, 25, 200, 4000, 40000],               // spots 9
-  [2, 0, 0, 0, 1, 2, 20, 80, 500, 10000, 100000],         // spots 10
-  [2, 0, 0, 0, 0, 1, 10, 50, 250, 1500, 15000, 500000],   // spots 11
+  [],  // index 0 unused
+  [0, 2.74],  // spots 1
+  [0, 1.01, 5.03],  // spots 2
+  [0, 0, 2.69, 22.4],  // spots 3
+  [0, 0, 0.99, 3.96, 99],  // spots 4
+  [0, 0, 0, 1.93, 19.3, 450],  // spots 5
+  [0, 0, 0, 0.99, 6.92, 49.4, 1600],  // spots 6
+  [0, 0, 0, 0.97, 2.92, 19.5, 97.5, 5000],  // spots 7
+  [0, 0, 0, 0, 1.98, 9.92, 49.6, 992, 15000],  // spots 8
+  [0, 0, 0, 0, 0.98, 4.9, 24.5, 196, 3924, 40000],  // spots 9
+  [1.63, 0, 0, 0, 0.81, 1.63, 16.3, 65, 406, 8126, 100000],  // spots 10
+  [1.98, 0, 0, 0, 0, 0.99, 9.91, 49.5, 248, 1486, 14863, 500000],  // spots 11
 ];
 
 /**

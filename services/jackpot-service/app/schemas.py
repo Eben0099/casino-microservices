@@ -112,6 +112,9 @@ class ContributeRequest(BaseModel):
     kiosk_code: Optional[str] = Field(default=None, max_length=20)
     agent_id: str = Field(..., min_length=1)
     wager: int = Field(..., gt=0)
+    # Human-readable code of the ticket (e.g. "TK-20260530-ABCDEF"), surfaced in
+    # the win celebration so the player + agent know who won.
+    short_code: Optional[str] = Field(default=None, max_length=64)
 
 
 class HitInfo(BaseModel):

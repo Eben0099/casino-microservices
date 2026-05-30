@@ -40,6 +40,9 @@ export const useKenoWs = (kioskCode) => {
       lastHitDrawId: null,
     },
     medals: { bronze: 0, silver: 0, gold: 0 },
+    // Latest backend `jackpot_hit` (one-shot win signal), or null. Deduped by
+    // hitId so a reconnect/replay doesn't re-fire the win overlay.
+    lastJackpotHit: null,
     connected: false,
   });
 
@@ -170,6 +173,26 @@ export const useKenoWs = (kioskCode) => {
               ...prev,
               medals: msg.medals ?? prev.medals,
             }));
+            break;
+          }
+
+          case 'jackpot_hit': {
+            // One-shot win signal relayed from jackpot-service. Dedupe on hitId
+            // (Redis pub/sub is at-least-once across reconnects).
+            setState((prev) => {
+              if (prev.lastJackpotHit?.hitId === msg.hitId) return prev;
+              return {
+                ...prev,
+                lastJackpotHit: {
+                  hitId: msg.hitId,
+                  scope: msg.scope,
+                  tier: msg.tier ?? null,
+                  amount: msg.amount ?? 0,
+                  durationMs: msg.celebrationDurationMs ?? 10000,
+                  ticketCode: msg.winnerTicketCode ?? null,
+                },
+              };
+            });
             break;
           }
 
