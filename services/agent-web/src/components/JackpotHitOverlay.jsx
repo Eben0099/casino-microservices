@@ -1,19 +1,19 @@
-import React, { useEffect, useMemo } from 'react';
-import { Trophy, X, Sparkles, Crown } from 'lucide-react';
-import { useT } from '../i18n';
+import React, { useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 /**
- * Plein-ecran modal affichee quand un jackpot est gagne. Style casino premium :
- * confettis, shimmer, polices display. Le theme (couleurs + libelle) depend du
- * pot gagne (general / volkeno / bronze / silver / or) et la duree d'affichage
- * est pilotee par `durationMs` (reglage admin `celebration_duration_ms`).
+ * Jackpot win celebration for the cashier — mirrors the VOLKENO display design
+ * (dark card, pulsing halo, per-pot accent, amount, winning-ticket badge).
+ * The theme depends on the pot won (general / volkeno / bronze / silver / gold)
+ * and the on-screen duration is driven by `durationMs` (admin-set
+ * `celebration_duration_ms`). All copy is English.
  */
 const POT_PALETTE = {
-  general: { label: 'JACKPOT GÉNÉRAL', accent: '#fde047', deep: '#ca8a04', glow: 'rgba(253,224,71,0.7)' },
-  volkeno: { label: 'JACKPOT VOLKENO', accent: '#fb923c', deep: '#c2410c', glow: 'rgba(249,115,22,0.7)' },
-  bronze:  { label: 'MÉDAILLE BRONZE', accent: '#d98a4e', deep: '#92400e', glow: 'rgba(180,83,9,0.6)' },
-  silver:  { label: 'MÉDAILLE ARGENT', accent: '#d7dee8', deep: '#64748b', glow: 'rgba(148,163,184,0.6)' },
-  gold:    { label: 'MÉDAILLE OR',     accent: '#fbbf24', deep: '#b45309', glow: 'rgba(245,158,11,0.7)' },
+  general: { label: 'GENERAL JACKPOT', sub: 'The network grand prize!', accent: '#fde047', glow: 'rgba(250,204,21,0.55)', ring: '#ca8a04' },
+  volkeno: { label: 'VOLKENO JACKPOT', sub: 'The eruption pays big!',   accent: '#fb923c', glow: 'rgba(249,115,22,0.55)', ring: '#c2410c' },
+  bronze:  { label: 'BRONZE MEDAL',    sub: 'Bronze tier won',          accent: '#d98a4e', glow: 'rgba(180,83,9,0.5)',    ring: '#92400e' },
+  silver:  { label: 'SILVER MEDAL',    sub: 'Silver tier won',          accent: '#d7dee8', glow: 'rgba(148,163,184,0.5)', ring: '#64748b' },
+  gold:    { label: 'GOLD MEDAL',      sub: 'Gold tier won!',           accent: '#fbbf24', glow: 'rgba(245,158,11,0.55)', ring: '#b45309' },
 };
 
 function potKey(scope, tier) {
@@ -25,8 +25,18 @@ function potKey(scope, tier) {
   return s === 'GAME' ? 'volkeno' : 'general';
 }
 
+// Confetti rain — the lively motion from the original cashier celebration.
+const CONFETTI_COLORS = ['#fde047', '#f59e0b', '#ef4444', '#ec4899', '#a855f7', '#3b82f6', '#10b981', '#ffffff'];
+const CONFETTI = Array.from({ length: 44 }).map((_, i) => ({
+  left: (i * 71) % 100,
+  size: 6 + (i % 5),
+  color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+  drift: ((i * 89) % 120) - 60,
+  delay: ((i * 137) % 1500) / 1000,
+  duration: 2.6 + ((i * 53) % 1600) / 1000,
+}));
+
 const JackpotHitOverlay = ({ amount, ticketCode, onClose, scope, tier, durationMs = 8000 }) => {
-  const { t, fmtN } = useT();
   const theme = POT_PALETTE[potKey(scope, tier)] || POT_PALETTE.general;
 
   useEffect(() => {
@@ -36,243 +46,122 @@ const JackpotHitOverlay = ({ amount, ticketCode, onClose, scope, tier, durationM
     return () => { clearTimeout(id); window.removeEventListener('keydown', onKey); };
   }, [onClose, durationMs]);
 
-  // 36 confettis avec positions/couleurs/delays pseudo-aleatoires deterministes
-  const confetti = useMemo(() => {
-    const COLORS = ['#fde047', '#f59e0b', '#ef4444', '#ec4899', '#a855f7', '#3b82f6', '#10b981', '#fff'];
-    return Array.from({ length: 36 }).map((_, i) => ({
-      key: i,
-      left: (i * 71) % 100,                       // pseudo-random 0..99
-      color: COLORS[i % COLORS.length],
-      delay: ((i * 137) % 1000) / 1000,          // 0..1s
-      duration: 2.4 + ((i * 53) % 1600) / 1000,  // 2.4..4s
-      size: 6 + (i % 5),
-      rotate: (i * 47) % 360,
-    }));
-  }, []);
-
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 100,
-        background: 'radial-gradient(ellipse at center, rgba(40,30,5,0.92) 0%, rgba(0,0,0,0.97) 70%)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        animation: 'jp-fade-in 0.4s ease-out',
-        overflow: 'hidden',
-      }}
-    >
-      <style>{`
-        @keyframes jp-fade-in { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes jp-pop {
-          0%   { transform: scale(0.5) rotate(-3deg); opacity: 0 }
-          60%  { transform: scale(1.08) rotate(1deg); opacity: 1 }
-          100% { transform: scale(1) rotate(0) }
-        }
-        @keyframes jp-glow {
-          0%, 100% { box-shadow: 0 0 80px rgba(253,224,71,0.4), 0 0 160px rgba(234,179,8,0.2), inset 0 0 60px rgba(253,224,71,0.1); }
-          50%      { box-shadow: 0 0 140px rgba(253,224,71,0.75), 0 0 240px rgba(234,179,8,0.45), inset 0 0 80px rgba(253,224,71,0.2); }
-        }
-        @keyframes jp-shimmer {
-          0%   { background-position: -200% center; }
-          100% { background-position: 200% center; }
-        }
-        @keyframes jp-confetti {
-          0%   { transform: translate3d(0, -120vh, 0) rotate(0); opacity: 0; }
-          10%  { opacity: 1; }
-          100% { transform: translate3d(var(--drift, 0px), 120vh, 0) rotate(720deg); opacity: 0.7; }
-        }
-        @keyframes jp-crown-bob {
-          0%, 100% { transform: translateY(0) rotate(-4deg); }
-          50%      { transform: translateY(-6px) rotate(4deg); }
-        }
-        @keyframes jp-twinkle-big {
-          0%, 100% { opacity: 0; transform: scale(0.6) rotate(0); }
-          50%      { opacity: 1; transform: scale(1.2) rotate(180deg); }
-        }
-        @keyframes jp-amount-glow {
-          0%, 100% { filter: drop-shadow(0 0 18px rgba(253,224,71,0.7)) drop-shadow(0 0 36px rgba(234,179,8,0.4)); }
-          50%      { filter: drop-shadow(0 0 28px rgba(253,224,71,1)) drop-shadow(0 0 56px rgba(234,179,8,0.7)); }
-        }
-      `}</style>
-
-      {/* Confetti rain */}
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-        {confetti.map(c => (
-          <span key={c.key} style={{
-            position: 'absolute', top: 0,
-            left: `${c.left}%`,
-            width: c.size, height: c.size * 1.6,
-            background: c.color,
-            borderRadius: 2,
-            transform: `rotate(${c.rotate}deg)`,
-            animation: `jp-confetti ${c.duration}s linear ${c.delay}s infinite`,
-            ['--drift']: `${(c.key % 2 === 0 ? 1 : -1) * (c.key * 7 % 80)}px`,
-          }} />
-        ))}
-      </div>
-
-      <div
-        onClick={(e) => e.stopPropagation()}
+    <AnimatePresence>
+      <motion.div
+        onClick={onClose}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.4 }}
         style={{
-          position: 'relative',
-          padding: '52px 64px 44px', borderRadius: 28,
-          background: 'linear-gradient(160deg, #0d0a04 0%, #1a1407 50%, #2b1f08 100%)',
-          border: '3px solid transparent',
-          backgroundClip: 'padding-box',
-          textAlign: 'center', minWidth: 540, maxWidth: 680,
-          animation: 'jp-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), jp-glow 2.2s ease-in-out infinite',
-        }}>
-        {/* Bordure doree ornee */}
-        <div style={{
-          position: 'absolute', inset: -3, borderRadius: 28,
-          background: 'linear-gradient(135deg, #fde047 0%, #ca8a04 25%, #fde047 50%, #ca8a04 75%, #fde047 100%)',
-          backgroundSize: '300% 300%',
-          animation: 'jp-shimmer 3s linear infinite',
-          zIndex: -1,
-        }} />
-
-        <button onClick={onClose} aria-label="Close" style={{
-          position: 'absolute', top: 16, right: 16,
-          background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(253,224,71,0.2)',
-          color: 'rgba(253,224,71,0.6)', cursor: 'pointer',
-          padding: 6, borderRadius: 8, display: 'flex',
-        }}>
-          <X size={18} />
-        </button>
-
-        {/* Sparkles décor */}
-        <Sparkles size={22} style={{
-          position: 'absolute', top: 28, left: 36, color: '#fde047',
-          animation: 'jp-twinkle-big 2s ease-in-out infinite',
-        }} />
-        <Sparkles size={16} style={{
-          position: 'absolute', top: 56, right: 80, color: '#f59e0b',
-          animation: 'jp-twinkle-big 1.6s ease-in-out 0.4s infinite',
-        }} />
-        <Sparkles size={20} style={{
-          position: 'absolute', bottom: 60, left: 50, color: '#fde047',
-          animation: 'jp-twinkle-big 2.3s ease-in-out 0.8s infinite',
-        }} />
-        <Sparkles size={14} style={{
-          position: 'absolute', bottom: 90, right: 50, color: '#f59e0b',
-          animation: 'jp-twinkle-big 1.9s ease-in-out 1.1s infinite',
-        }} />
-
-        {/* Crown + Trophy stack */}
-        <div style={{ position: 'relative', height: 110, marginBottom: 12 }}>
-          <Crown size={32} style={{
-            position: 'absolute', top: -4, left: '50%', transform: 'translateX(-50%) rotate(-4deg)',
-            color: '#fde047',
-            filter: 'drop-shadow(0 0 12px rgba(253,224,71,0.9))',
-            animation: 'jp-crown-bob 2s ease-in-out infinite',
-          }} />
-          <div style={{
-            margin: '14px auto 0', width: 92, height: 92, borderRadius: 999,
-            background: 'radial-gradient(circle at 30% 30%, #fde047 0%, #eab308 40%, #92400e 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 60px rgba(253,224,71,0.7), inset 0 -16px 24px rgba(0,0,0,0.4)',
-            border: '3px solid rgba(253,224,71,0.6)',
-          }}>
-            <Trophy size={48} style={{ color: '#1a0f00', strokeWidth: 2.4 }} />
-          </div>
+          position: 'fixed', inset: 0, zIndex: 100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'radial-gradient(60% 60% at 50% 45%, rgba(0,0,0,0.6), rgba(0,0,0,0.85))',
+        }}
+      >
+        <style>{`@keyframes jp-confetti {
+          0%   { transform: translate3d(0, -110%, 0) rotate(0deg); opacity: 0; }
+          8%   { opacity: 1; }
+          100% { transform: translate3d(var(--drift, 0px), 110vh, 0) rotate(720deg); opacity: 0.65; }
+        }`}</style>
+        {/* confetti rain */}
+        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
+          {CONFETTI.map((c, i) => (
+            <span key={i} style={{
+              position: 'absolute', top: '-6%', left: `${c.left}%`,
+              width: c.size, height: c.size * 0.45, borderRadius: 2, background: c.color,
+              '--drift': `${c.drift}px`,
+              animation: `jp-confetti ${c.duration}s linear ${c.delay}s infinite`,
+            }} />
+          ))}
         </div>
 
-        {/* Title — Cinzel display */}
-        <h1 style={{
-          margin: '4px 0 6px',
-          fontFamily: "'Cinzel', 'Outfit', serif",
-          fontSize: 64, fontWeight: 900, letterSpacing: '0.12em',
-          background: 'linear-gradient(180deg, #fff7c2 0%, #fde047 30%, #eab308 70%, #92400e 100%)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          textShadow: '0 0 30px rgba(253,224,71,0.4)',
-          lineHeight: 1,
-          textTransform: 'uppercase',
-        }}>
-          {t('jackpots.hit.title')}
-        </h1>
+        <motion.div
+          onClick={(e) => e.stopPropagation()}
+          initial={{ scale: 0.6, y: 24 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.85, opacity: 0 }}
+          transition={{ type: 'spring', stiffness: 220, damping: 16 }}
+          style={{
+            position: 'relative',
+            zIndex: 1,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
+            padding: '2.6rem 3.4rem', borderRadius: 28,
+            border: `2px solid ${theme.ring}`,
+            background: 'linear-gradient(180deg, rgba(20,14,8,0.94), rgba(8,6,4,0.97))',
+            boxShadow: `0 0 90px ${theme.glow}, inset 0 0 40px rgba(0,0,0,0.6)`,
+          }}
+        >
+          {/* pulsing halo */}
+          <motion.div
+            aria-hidden
+            animate={{ scale: [1, 1.18, 1], opacity: [0.5, 0.85, 0.5] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+            style={{
+              position: 'absolute', width: 240, height: 240, borderRadius: '50%',
+              background: `radial-gradient(circle, ${theme.glow}, transparent 70%)`,
+              top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 0,
+            }}
+          />
 
-        {/* Decorative accent line (per-pot color) */}
-        <div style={{
-          width: 220, height: 2, margin: '6px auto 16px',
-          background: `linear-gradient(90deg, transparent, ${theme.accent} 50%, transparent)`,
-        }} />
-
-        {/* Per-pot label — which jackpot was won */}
-        <p style={{
-          fontFamily: "'Bebas Neue', 'Outfit', sans-serif",
-          fontSize: 22, color: theme.accent, margin: '0 0 28px',
-          fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase',
-          textShadow: `0 0 22px ${theme.glow}`,
-        }}>
-          {theme.label}
-        </p>
-
-        {/* Montant — la star */}
-        <div style={{
-          padding: '24px 32px', borderRadius: 16,
-          background: 'linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(20,15,5,0.6) 100%)',
-          border: '1px solid rgba(253,224,71,0.35)',
-          marginBottom: 24,
-          boxShadow: 'inset 0 0 30px rgba(253,224,71,0.08)',
-        }}>
-          <div style={{
-            fontFamily: "'Bebas Neue', sans-serif",
-            fontSize: 13, letterSpacing: '0.32em',
-            color: '#94a3b8', marginBottom: 6,
-          }}>
-            {t('jackpots.hit.payoutLabel')}
-          </div>
-          <div style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontSize: 76, fontWeight: 900, lineHeight: 1,
-            fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em',
-            background: `linear-gradient(180deg, #ffffff 0%, ${theme.accent} 45%, ${theme.deep} 100%)`,
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-            animation: 'jp-amount-glow 1.8s ease-in-out infinite',
-          }}>
-            {fmtN(amount)}
-            <span style={{
-              fontFamily: "'Bebas Neue', sans-serif",
-              fontSize: 28, marginLeft: 8, opacity: 0.85,
-              letterSpacing: '0.15em',
-              WebkitTextFillColor: theme.deep,
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <div style={{ fontSize: 13, letterSpacing: '0.35em', color: '#fff7e6', opacity: 0.8, fontWeight: 800 }}>
+              WINNER
+            </div>
+            <div style={{
+              marginTop: 8, fontSize: 40, fontWeight: 900, letterSpacing: '0.04em',
+              color: theme.accent, textShadow: `0 0 24px ${theme.glow}`,
             }}>
-              XAF
-            </span>
-          </div>
-        </div>
+              {theme.label}
+            </div>
+            <motion.div
+              animate={{ scale: [1, 1.04, 1] }}
+              transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                marginTop: 16, fontSize: 70, fontWeight: 900, lineHeight: 1,
+                color: '#fffdf7', fontFamily: 'Arial, system-ui, sans-serif',
+                fontVariantNumeric: 'tabular-nums', textShadow: `0 0 36px ${theme.glow}`,
+              }}
+            >
+              {Number(amount || 0).toLocaleString('en-US')}
+              <span style={{ fontSize: 28, marginLeft: 10, color: theme.accent }}>XAF</span>
+            </motion.div>
+            <div style={{ marginTop: 14, fontSize: 15, color: '#e8d9bf', opacity: 0.85 }}>
+              {theme.sub}
+            </div>
 
-        {ticketCode && (
-          <div style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontSize: 12, color: '#94a3b8',
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '6px 14px', borderRadius: 999,
-            background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(148,163,184,0.2)',
-          }}>
-            <span style={{ letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700 }}>
-              {t('jackpots.hit.ticket')}
-            </span>
-            <span style={{ fontFamily: 'ui-monospace, monospace', color: '#fde047', fontWeight: 700 }}>
-              {ticketCode}
-            </span>
-          </div>
-        )}
+            {ticketCode && (
+              <div style={{
+                marginTop: 18, display: 'inline-flex', alignItems: 'center', gap: 10,
+                padding: '8px 18px', borderRadius: 999,
+                background: 'rgba(0,0,0,0.45)', border: `1px solid ${theme.ring}`,
+              }}>
+                <span style={{ fontSize: 11, letterSpacing: '0.2em', color: '#cbbfa6', fontWeight: 800, textTransform: 'uppercase' }}>
+                  Winning ticket
+                </span>
+                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 18, fontWeight: 900, color: theme.accent, letterSpacing: '0.05em' }}>
+                  {ticketCode}
+                </span>
+              </div>
+            )}
 
-        <button onClick={onClose} style={{
-          marginTop: 28, padding: '14px 40px', borderRadius: 12,
-          background: `linear-gradient(135deg, ${theme.accent}, ${theme.deep})`,
-          color: '#1a0f00', border: 'none', cursor: 'pointer',
-          fontFamily: "'Bebas Neue', sans-serif",
-          fontSize: 17, fontWeight: 400, letterSpacing: '0.22em',
-          textTransform: 'uppercase',
-          boxShadow: `0 8px 24px ${theme.glow}, inset 0 -3px 8px rgba(0,0,0,0.2)`,
-          display: 'block', margin: '28px auto 0',
-        }}>
-          {t('jackpots.hit.dismiss')}
-        </button>
-      </div>
-    </div>
+            <button
+              onClick={onClose}
+              style={{
+                marginTop: 26, padding: '12px 36px', borderRadius: 12,
+                background: `linear-gradient(135deg, ${theme.accent}, ${theme.ring})`,
+                color: '#1a0f00', border: 'none', cursor: 'pointer',
+                fontSize: 14, fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase',
+                boxShadow: `0 8px 24px ${theme.glow}`,
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 };
 

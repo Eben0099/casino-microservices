@@ -179,6 +179,33 @@ export const Keno = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastJackpotHit?.hitId]);
 
+  // ---- Design preview (no real jackpot needed) -----------------------------
+  // Pin the win overlay so its design can be edited live:
+  //   • URL:     ?previewJackpot=bronze  (general|volkeno|bronze|silver|gold)
+  //   • Console: window.__kenoCelebrate('bronze')         (persists ~1h)
+  //              window.__kenoCelebrate('bronze', 10000)  (auto-hide 10s)
+  useEffect(() => {
+    const POT = {
+      general: { scope: 'GLOBAL', tier: null,     amount: 12500000 },
+      volkeno: { scope: 'GAME',   tier: null,     amount: 4200000 },
+      bronze:  { scope: 'LOCAL',  tier: 'BRONZE', amount: 850000 },
+      silver:  { scope: 'LOCAL',  tier: 'SILVER', amount: 3100000 },
+      gold:    { scope: 'LOCAL',  tier: 'GOLD',   amount: 9400000 },
+    };
+    const show = (pot, ms = 3600000) => {
+      const p = POT[pot];
+      if (!p) return;
+      setJackpotHit({
+        amount: p.amount, ticketCode: 'TK-20260530-AB12CD',
+        scope: p.scope, tier: p.tier, durationMs: ms,
+      });
+    };
+    window.__kenoCelebrate = show;
+    const pv = new URLSearchParams(window.location.search).get('previewJackpot');
+    if (pv) show(pv);
+    return () => { delete window.__kenoCelebrate; };
+  }, []);
+
   // ---- PENDING → WON/LOST polling ------------------------------------------
   // Mirrors the polling effect from Jeux.jsx exactly.
 
