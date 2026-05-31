@@ -410,10 +410,12 @@ async def run(args) -> None:
                         scope = msg.get("scope")
                         tier = msg.get("tier")
                         amount = int(msg.get("amount", 0))
+                        winner = msg.get("winnerTicketCode")
                         label = f"{scope}{'/' + tier if tier else ''}"
                         print("\n" + "🎉" * 28)
                         print(f"🎉  JACKPOT HIT  ({hits})  {label}  "
                               f"amount={amount:,} XAF  drawId={msg.get('drawId')}")
+                        print(f"🎉  winner ticket: {winner if winner else '— (rebuild ticket/jackpot/keno services)'}")
                         print(f"🎉  → watch the VOLKENO cinematic + cashier overlay; the pot "
                               f"amount now resets (drops) in the backoffice")
                         print("🎉" * 28 + "\n")
