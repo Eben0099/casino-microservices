@@ -269,23 +269,29 @@ def generate_provably_fair_result(server_seed: str, nonce: str) -> str:
     decimal_value = int(hash_hex[:8], 16)
     return str(decimal_value % 37)
 
-async def set_game_phase(phase: str, duration: float, round_id: str, result=None):
+async def set_game_phase(phase: str, duration: float, round_id: str, result=None, server_seed_hash: str = None):
     current_game_state.update({
         "round_id": round_id,
         "phase": phase,
         "started_at": time.time(),
         "duration": duration,
-        "result": result
+        "result": result,
+        "server_seed_hash": server_seed_hash,
     })
-    
+
+    # `serverSeedHash` is the provably-fair commitment: it is published BEFORE
+    # the reveal so any consumer (the AGD integration, an external auditor) can
+    # record it up-front and later check the revealed seed hashes to it. The
+    # seed itself is only released in ROUND_FINISHED.
     await manager.broadcast({
         "type": "phase_changed",
         "serverTime": time.time(),
         "gameId": round_id,
         "phase": phase,
-        "duration": duration
+        "duration": duration,
+        "serverSeedHash": server_seed_hash,
     })
-    
+
     # Optional fallback for other microservices via Redis
     if redis_client:
         await redis_client.set("roulette:current_state", json.dumps(current_game_state))
@@ -294,7 +300,8 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
             "serverTime": time.time(),
             "gameId": round_id,
             "phase": phase,
-            "duration": duration
+            "duration": duration,
+            "serverSeedHash": server_seed_hash,
         }))
 
 async def game_loop():
@@ -380,21 +387,21 @@ async def game_loop():
             # ÉTAT 1 : BETTING
             # ==========================================
             print(f"🟢 [BETTING] {round_id} ({t_betting}s)")
-            await set_game_phase("Betting", t_betting, round_id)
+            await set_game_phase("Betting", t_betting, round_id, server_seed_hash=server_seed_hash)
             await asyncio.sleep(t_betting)
 
             # ==========================================
             # ÉTAT 2 : BETS CLOSING
             # ==========================================
             print(f"🟠 [BETS CLOSING] {round_id}")
-            await set_game_phase("BetsClosing", t_closing, round_id)
+            await set_game_phase("BetsClosing", t_closing, round_id, server_seed_hash=server_seed_hash)
             await asyncio.sleep(t_closing)
 
             # ==========================================
             # ÉTAT 3 : SPINNING
             # ==========================================
             print(f"🟡 [SPINNING] {round_id} - Target: {winning_number}")
-            await set_game_phase("Spinning", TIME_SPINNING, round_id, result_payload)
+            await set_game_phase("Spinning", TIME_SPINNING, round_id, result_payload, server_seed_hash=server_seed_hash)
 
             # The Unity wheel needs the result at the START of Spinning so it can
             # spin for the full phase duration and land exactly when the phase ends.
@@ -449,14 +456,20 @@ async def game_loop():
             # ÉTAT 4 : RESULT
             # ==========================================
             print(f"🔴 [RESULT] {round_id} - Gagnant: {winning_number}")
-            await set_game_phase("Result", t_result, round_id, result_payload)
+            await set_game_phase("Result", t_result, round_id, result_payload, server_seed_hash=server_seed_hash)
             
             # --- NOTIFY TICKET SERVICE ---
+            # Reveal the server_seed here (after betting closed) so downstream
+            # consumers can store the REAL provably-fair seed and expose a
+            # verifiable /verify endpoint. winning_number = int(hmac_sha256(
+            # server_seed, round_id).hexdigest()[:8], 16) mod 37.
             if redis_client:
                 await redis_client.publish("roulette-events", json.dumps({
                     "event": "ROUND_FINISHED",
                     "round_id": round_id,
-                    "winning_number": str(winning_number)
+                    "winning_number": str(winning_number),
+                    "server_seed": server_seed,
+                    "server_seed_hash": server_seed_hash
                 }))
             
             # Sauvegarde en base de données
