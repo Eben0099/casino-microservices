@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { IS_AGD, AGD_API_URL, AGD_KENO_GAME_CODE } from '../config';
 
 /**
  * useKenoWs — connects to the Keno engine WebSocket and surfaces live state.
@@ -50,6 +51,57 @@ export const useKenoWs = (kioskCode) => {
   stateRef.current = state;
 
   useEffect(() => {
+    // ------------------------------------------------------------------
+    // AGD mode: the keno engine runs cyclic but its WS is internal-only.
+    // Poll `GET /games/KENO/current-round` once per second (mirrors
+    // useRoulette's AGD branch). The endpoint returns seconds; we convert
+    // phaseStartedAt/duration to epoch-ms so the progressive-reveal logic
+    // below stays unchanged. Live jackpots come from useKenoJackpots (REST).
+    // ------------------------------------------------------------------
+    if (IS_AGD) {
+      let aborted = false;
+      let timer = null;
+      const url = `${AGD_API_URL}/games/${AGD_KENO_GAME_CODE}/current-round`;
+
+      const tick = async () => {
+        if (aborted) return;
+        try {
+          const resp = await fetch(url, { method: 'GET', credentials: 'omit' });
+          if (resp.ok) {
+            const body = await resp.json();
+            const d = body?.data ?? body;
+            if (d && d.roundId) {
+              setState((prev) => ({
+                ...prev,
+                phase: d.phase || 'idle',
+                drawId: d.roundId,
+                duration: Math.round((d.phaseDuration ?? 0) * 1000), // s → ms
+                phaseStartedAt: (d.phaseStartedAt ?? 0) * 1000,        // s → ms
+                remaining: Math.max(0, Math.floor(d.remaining ?? 0)),
+                drawnNumbers: d.drawnNumbers ?? null,
+                connected: true,
+              }));
+            }
+          } else if (resp.status === 404) {
+            // Engine booting — keep prior state, just flag disconnected.
+            setState((prev) => ({ ...prev, connected: false }));
+          }
+        } catch {
+          // Network blip — retry next tick, leave state unchanged.
+        }
+        if (!aborted) timer = window.setTimeout(tick, 1000);
+      };
+
+      tick();
+      return () => {
+        aborted = true;
+        if (timer) window.clearTimeout(timer);
+      };
+    }
+
+    // ------------------------------------------------------------------
+    // Standalone mode: WebSocket from the Python keno engine.
+    // ------------------------------------------------------------------
     let ws = null;
     let reconnectTimer = null;
     let tickTimer = null;

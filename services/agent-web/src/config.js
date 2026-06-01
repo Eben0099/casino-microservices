@@ -39,6 +39,7 @@ export const AGD_API_URL = env.VITE_AGD_API_URL || "http://localhost:8880/api/v1
 export const AGD_AUTH_URL = env.VITE_AGD_AUTH_URL || "http://localhost:8880/api/v1/agd_auth";
 export const AGD_WS_URL = env.VITE_AGD_WS_URL || "http://localhost:8880/casino/ws";
 export const AGD_GAME_CODE = env.VITE_AGD_GAME_CODE || "ROULETTE_EU";
+export const AGD_KENO_GAME_CODE = env.VITE_AGD_KENO_GAME_CODE || "KENO";
 
 /**
  * The token bootstrap. In embed+agd mode, the parent typically appends

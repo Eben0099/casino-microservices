@@ -131,6 +131,9 @@ export const Keno = () => {
       const res = await ticketApi.create({
         agent_id: user.id,
         game_id: 'KENO-DRAW1',
+        // AGD mode routes by gameCode; without this the adapter falls back to
+        // ROULETTE_EU and the keno ticket would be placed against the wrong game.
+        game_code: 'KENO',
         round_id: String(drawId),
         bets,
         replay_rounds: replayRounds,
