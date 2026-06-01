@@ -323,6 +323,18 @@ async def _set_phase(
                 "phase_duration_ms": duration_ms,
             }),
         )
+        # Publish the transition on keno-events so NestJS (agd-casino-service)
+        # can consume the cycle exactly like roulette-events. Best-effort.
+        await redis_client.publish(
+            "keno-events",
+            json.dumps({
+                "type": "phase_changed",
+                "drawId": draw_id,
+                "phase": phase,
+                "durationMs": duration_ms,
+                "serverTime": _now_ms(),
+            }),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +469,19 @@ async def game_loop() -> None:
                 "draw", draw_id, int(t_draw * 1000), drawn_numbers=numbers
             )
 
+            # 1b. Early reveal on keno-events for NestJS animation (mirrors
+            # roulette result_revealed). Does NOT replace the WS draw_locked.
+            if redis_client:
+                await redis_client.publish(
+                    "keno-events",
+                    json.dumps({
+                        "type": "result_revealed",
+                        "drawId": draw_id,
+                        "drawnNumbers": numbers,
+                        "serverTime": _now_ms(),
+                    }),
+                )
+
             # 2. draw_locked immediately after
             await manager.broadcast({
                 "type": "draw_locked",
@@ -531,6 +556,18 @@ async def game_loop() -> None:
                 "serverTime": _now_ms(),
                 "snapshot": snapshot,
             })
+
+            # 1b. Mirror stats_updated on keno-events for NestJS consumers.
+            if redis_client:
+                await redis_client.publish(
+                    "keno-events",
+                    json.dumps({
+                        "type": "stats_updated",
+                        "drawId": draw_id,
+                        "stats": snapshot,
+                        "serverTime": _now_ms(),
+                    }),
+                )
 
             # 2. phase_changed(results)
             await _set_phase("results", draw_id, int(t_results * 1000), drawn_numbers=numbers)
