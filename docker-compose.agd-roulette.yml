@@ -1,0 +1,61 @@
+# =============================================================================
+# AGD-integrated roulette engine
+# =============================================================================
+# Runs ONLY the cyclic game-roulette-service, wired to the SHARED AGD infra
+# (agd-redis + agd-postgres on the agd_default network) so it publishes
+# `roulette-events` to the same Redis that `agd-casino-service` subscribes to.
+#
+# The standalone Python ticket/jackpot/agent services are NOT needed here:
+# in integrated mode those are handled by agd-casino-service (NestJS).
+#
+# Deploy on the VPS:
+#   1. Put the secrets in an `.env` next to this file (see keys below).
+#   2. docker compose -f docker-compose.agd-roulette.yml up -d --build
+#
+# Required .env keys:
+#   POSTGRES_USER, POSTGRES_PASSWORD   (same as the AGD postgres)
+#   REDIS_PASSWORD                     (same as agd-redis)
+#   ROULETTE_ENGINE_API_KEY           (internal key; must match the one set on
+#                                      agd-casino-service for the on_demand path)
+# =============================================================================
+
+services:
+  casino-roulette-engine:
+    build:
+      context: ./services/game-roulette-service
+    image: ghcr.io/eben0099/casino-roulette-engine:latest
+    container_name: casino-roulette-engine
+    restart: unless-stopped
+    environment:
+      # Cyclic mode: runs the game loop + publishes phase/result/round events.
+      ENGINE_MODE: cyclic
+      # SHARED Redis — same instance/DB (0) agd-casino-service subscribes to.
+      REDIS_URL: redis://:${REDIS_PASSWORD}@agd-redis:6379/0
+      # Engine round persistence (auto-created by entrypoint init_db + alembic).
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@agd-postgres:5432/casino_roulette_db
+      ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@agd-postgres:5432/postgres
+      # Internal key for the on_demand HTTP path (must match agd-casino-service's
+      # ROULETTE_ENGINE_API_KEY). Cyclic publishing doesn't use it.
+      ROULETTE_ENGINE_INTERNAL_API_KEY: ${ROULETTE_ENGINE_API_KEY:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+    labels:
+      # Optional HTTP exposure for /status + /verify/{round_id} (provably-fair).
+      - "traefik.enable=true"
+      - "traefik.http.routers.casino-roulette.rule=PathPrefix(`/api/v1/roulette-engine`)"
+      - "traefik.http.routers.casino-roulette.entrypoints=web"
+      - "traefik.http.routers.casino-roulette.middlewares=strip-roulette@docker"
+      - "traefik.http.middlewares.strip-roulette.stripprefix.prefixes=/api/v1/roulette-engine"
+      - "traefik.http.services.casino-roulette.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/status', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    networks:
+      - agd-network
+
+networks:
+  agd-network:
+    name: agd_default
+    external: true
