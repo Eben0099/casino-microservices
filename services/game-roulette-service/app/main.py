@@ -269,7 +269,7 @@ def generate_provably_fair_result(server_seed: str, nonce: str) -> str:
     decimal_value = int(hash_hex[:8], 16)
     return str(decimal_value % 37)
 
-async def set_game_phase(phase: str, duration: float, round_id: str, result=None, server_seed_hash: str = None):
+async def set_game_phase(phase: str, duration: float, round_id: str, result=None, server_seed_hash: str | None = None):
     current_game_state.update({
         "round_id": round_id,
         "phase": phase,
