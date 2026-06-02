@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import { IS_AGD, AGD_GAME_CODE } from '../config';
+import { getAdapter } from '../api/adapters';
+import { agdPotsToCards } from './agdJackpots';
 
 const POLL_MS = 5000;
 
@@ -57,6 +60,14 @@ export const useKioskJackpots = (kioskCode) => {
     if (!kioskCode) return;
     try {
       setError(null);
+      if (IS_AGD) {
+        // AGD: read the unified pots from agd-casino-service (game-agnostic
+        // endpoint), keep GLOBAL + roulette pots.
+        const pots = await getAdapter().listJackpotsForKiosk(kioskCode);
+        if (!aliveRef.current) return;
+        setPots(agdPotsToCards(pots, AGD_GAME_CODE, ROULETTE_GAME_LABEL));
+        return;
+      }
       const res = await api.get(`/roulette/jackpots`, { params: { kiosk_id: kioskCode } });
       if (!aliveRef.current) return;
       setPots(toPotCards(res.data?.jackpots, kioskCode));

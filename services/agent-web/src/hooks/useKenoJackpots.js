@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import { IS_AGD, AGD_KENO_GAME_CODE } from '../config';
+import { getAdapter } from '../api/adapters';
+import { agdPotsToCards } from './agdJackpots';
 
 const POLL_MS = 5000;
 const KENO_GAME_LABEL = 'Keno';
@@ -102,6 +105,14 @@ export const useKenoJackpots = (kioskCode) => {
     if (!kioskCode) return;
     try {
       setError(null);
+      if (IS_AGD) {
+        // AGD: read the unified pots from agd-casino-service (game-agnostic
+        // endpoint), keep GLOBAL + keno pots.
+        const pots = await getAdapter().listJackpotsForKiosk(kioskCode);
+        if (!aliveRef.current) return;
+        setPots(agdPotsToCards(pots, AGD_KENO_GAME_CODE, KENO_GAME_LABEL));
+        return;
+      }
       const params = { kiosk_id: kioskCode };
       const res = await api.get('/keno/jackpots', { params });
       if (!aliveRef.current) return;
