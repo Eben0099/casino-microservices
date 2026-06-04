@@ -154,6 +154,18 @@ manager = ConnectionManager()
 # Toggle via env. Same code, two deployments.
 ENGINE_MODE = os.getenv("ENGINE_MODE", "cyclic").strip().lower()
 
+# --- Debug tirage -----------------------------------------------------------
+# Logue le résultat dès sa génération (début du round, AVANT l'ouverture des
+# mises) et le garde en mémoire pour GET /admin/debug/draw. But : vérifier que
+# tirage généré == tirage révélé == tirage réglé. Quiconque a accès aux logs
+# ou à la clé admin connaît le numéro avant la clôture — restreindre les deux.
+# ENGINE_DEBUG_LOG_DRAWS=0 coupe le log console (l'endpoint reste).
+DEBUG_LOG_DRAWS = os.getenv("ENGINE_DEBUG_LOG_DRAWS", "1") == "1"
+
+# Snapshot du round courant côté génération — servi UNIQUEMENT par
+# /admin/debug/draw (clé admin). Jamais broadcasté sur le WS public.
+current_debug_draw: dict | None = None
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -305,7 +317,7 @@ async def set_game_phase(phase: str, duration: float, round_id: str, result=None
         }))
 
 async def game_loop():
-    global current_stats
+    global current_stats, current_debug_draw
     print("🎰 Moteur de Roulette (Provably Fair) + WebSockets Unity démarré !")
 
 
@@ -382,6 +394,19 @@ async def game_loop():
             winning_number_str = generate_provably_fair_result(server_seed, round_id)
             winning_number = int(winning_number_str)
             result_payload = get_number_properties(winning_number)
+
+            current_debug_draw = {
+                "round_id": round_id,
+                "winning_number": winning_number,
+                "server_seed_hash": server_seed_hash,
+                "generated_at": int(time.time() * 1000),
+            }
+            if DEBUG_LOG_DRAWS:
+                print(
+                    f"🔍 [GENERATED] {round_id} -> {winning_number} "
+                    f"(seed_hash={server_seed_hash[:16]}…)",
+                    flush=True,
+                )
 
             # ==========================================
             # ÉTAT 1 : BETTING
@@ -547,6 +572,18 @@ def verify_admin_key(x_api_key: str = Header(None)):
     if x_api_key != ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Accès refusé.")
     return x_api_key
+
+
+@app.get("/admin/debug/draw", dependencies=[Depends(verify_admin_key)])
+async def admin_debug_draw():
+    """Tirage du round COURANT tel que généré (debug / vérification de match).
+
+    Révèle le numéro avant la clôture des mises — protégé par la clé admin,
+    à n'utiliser que pour le débogage. Compare avec result_revealed / /verify.
+    """
+    if current_debug_draw is None:
+        raise HTTPException(status_code=404, detail="Aucun round généré (moteur en démarrage ?)")
+    return {**current_debug_draw, "phase": current_game_state["phase"]}
 
 
 # --- ON-DEMAND ENGINE (Phase 5: AGD-integrated mode) ---
