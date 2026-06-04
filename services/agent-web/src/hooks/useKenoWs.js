@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { IS_AGD, AGD_API_URL, AGD_KENO_GAME_CODE } from '../config';
+import { getAdapter } from '../api/adapters';
 
 /**
  * useKenoWs — connects to the Keno engine WebSocket and surfaces live state.
@@ -57,11 +58,51 @@ export const useKenoWs = (kioskCode) => {
     // useRoulette's AGD branch). The endpoint returns seconds; we convert
     // phaseStartedAt/duration to epoch-ms so the progressive-reveal logic
     // below stays unchanged. Live jackpots come from useKenoJackpots (REST).
+    // Jackpot HITs come from `GET /jackpots/hits` polled every 5 s — same
+    // dedupe key (hitId = potId:cycle) as the standalone WS frame, so the
+    // celebration overlay behaves identically in both modes.
     // ------------------------------------------------------------------
     if (IS_AGD) {
       let aborted = false;
       let timer = null;
+      let hitsTimer = null;
       const url = `${AGD_API_URL}/games/${AGD_KENO_GAME_CODE}/current-round`;
+
+      // Only celebrate hits that happen AFTER mount (parity with the WS:
+      // standalone consumers never replay pre-connection hits either).
+      let hitsSinceMs = Date.now();
+      const pollHits = async () => {
+        if (aborted) return;
+        try {
+          const { serverTime, hits } = await getAdapter().listRecentJackpotHits({
+            gameCode: AGD_KENO_GAME_CODE,
+            kioskCode: kioskCode || null,
+            sinceMs: hitsSinceMs,
+          });
+          if (aborted) return;
+          if (serverTime) hitsSinceMs = serverTime;
+          const latest = hits[hits.length - 1];
+          if (latest) {
+            setState((prev) => {
+              if (prev.lastJackpotHit?.hitId === latest.hitId) return prev;
+              return {
+                ...prev,
+                lastJackpotHit: {
+                  hitId: latest.hitId,
+                  scope: latest.scope,
+                  tier: latest.tier ?? null,
+                  amount: latest.payout ?? 0,
+                  durationMs: 10000,
+                  ticketCode: latest.ticketCode ?? null,
+                },
+              };
+            });
+          }
+        } catch {
+          // Network blip — retry next poll, leave state unchanged.
+        }
+        if (!aborted) hitsTimer = window.setTimeout(pollHits, 5000);
+      };
 
       const tick = async () => {
         if (aborted) return;
@@ -93,9 +134,11 @@ export const useKenoWs = (kioskCode) => {
       };
 
       tick();
+      pollHits();
       return () => {
         aborted = true;
         if (timer) window.clearTimeout(timer);
+        if (hitsTimer) window.clearTimeout(hitsTimer);
       };
     }
 

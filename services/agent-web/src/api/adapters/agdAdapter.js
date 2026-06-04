@@ -8,6 +8,7 @@ import { ADAPTER_MODES } from "./types";
 
 const TOKEN_KEY = "agent_token";
 const AGD_SESSION_KEY = "agd_session_id";
+const USER_KEY = "agent_user"; // same key AuthContext persists under
 
 /* -------------------------------------------------------------------------
  * AGD adapter — agent-web ↔ agd-casino-service (Phase 9, integrated mode)
@@ -59,6 +60,22 @@ function peel(resp) {
 
 function shortenUuid(uuid) {
   return uuid ? `${uuid.slice(0, 8).toUpperCase()}` : null;
+}
+
+/**
+ * The cashier's kiosk code, read from the persisted AuthContext user.
+ * Sessions MUST carry it: the jackpot engine keys its LOCAL pots
+ * (bronze/silver/gold) by kiosk_code and auto-creates them at the first
+ * contribution — a null kiosk means no LOCAL pots and no per-kiosk hit
+ * targeting, ever.
+ */
+function cashierKioskCode() {
+  try {
+    const u = JSON.parse(localStorage.getItem(USER_KEY) || "null");
+    return u?.kiosk_code || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -278,7 +295,7 @@ export function createAgdAdapter() {
       }
       const ctx = await this.getPlayContext();
       let sessionId = ctx.sessionId;
-      if (!sessionId) sessionId = await getOrOpenSession(null);
+      if (!sessionId) sessionId = await getOrOpenSession(cashierKioskCode());
 
       // round_id is required by the server's anti-décalage check: if the
       // cashier clicked "Valider" just as the phase rolled to BetsClosing,
@@ -407,6 +424,26 @@ export function createAgdAdapter() {
         }
       }
       return pots;
+    },
+
+    /**
+     * Recent jackpot HITs for the celebration overlay. The POS polls this
+     * (there is no socket to the engine in AGD mode) and dedupes on hitId —
+     * the same `potId:cycle` key the standalone WS frame carries.
+     * Returns { serverTime, hits: [{ hitId, scope, tier, gameCode,
+     * kioskCode, payout, ticketCode, atMs }] }.
+     */
+    async listRecentJackpotHits({
+      gameCode = AGD_GAME_CODE,
+      kioskCode = null,
+      sinceMs = null,
+    } = {}) {
+      const params = { gameCode };
+      if (kioskCode) params.kioskCode = kioskCode;
+      if (sinceMs) params.sinceMs = sinceMs;
+      const resp = await casino.get("/jackpots/hits", { params });
+      const d = peel(resp) ?? {};
+      return { serverTime: d.serverTime ?? Date.now(), hits: d.hits ?? [] };
     },
 
     async verifyTicket(idOrCode) {
