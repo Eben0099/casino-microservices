@@ -25,7 +25,11 @@ const AGD_SESSION_KEY = "agd_session_id";
  *                                          when the user has no analytics)
  *   POST /tickets/:c/payout         <->   no-op (AGD auto-credits at settle);
  *                                          we just refetch the spin
- *   GET  /jackpots/by-kiosk/:code   <->   GET  /jackpots/by-kiosk/:code
+ *   GET  /jackpots/by-kiosk/:code   <->   GET  /jackpots?gameCode=&kioskCode=
+ *                                          (proxied from the standalone
+ *                                          jackpot engine — single source of
+ *                                          truth; the native by-kiosk pots
+ *                                          are dormant in cyclic mode)
  *
  * AGD sessions are opened LAZILY on the first placeTicket() call so that
  * opening agent-web in agd mode doesn't immediately commit a session.
@@ -356,10 +360,53 @@ export function createAgdAdapter() {
       };
     },
 
-    async listJackpotsForKiosk(kioskCode) {
+    async listJackpotsForKiosk(kioskCode, gameCode = AGD_GAME_CODE) {
       if (!kioskCode) return [];
-      const resp = await casino.get(`/jackpots/by-kiosk/${kioskCode}`);
-      return peel(resp)?.pots ?? [];
+      // GET /jackpots?gameCode&kioskCode proxies the standalone jackpot
+      // engine (the single source of truth since cyclic contributions moved
+      // there). The older /jackpots/by-kiosk/:code route reads the native
+      // NestJS pots, which no longer receive contributions — using it would
+      // freeze the bar at 0. The display shape { general, game, locals } is
+      // normalised here into the pot-card entries agdPotsToCards consumes.
+      const resp = await casino.get("/jackpots", {
+        params: { gameCode, kioskCode },
+      });
+      const d = peel(resp) ?? {};
+      const pots = [];
+      if (typeof d.general === "number") {
+        pots.push({
+          id: "general",
+          scope: "GLOBAL",
+          gameCode: null,
+          tier: null,
+          currentAmount: d.general,
+        });
+      }
+      if (d.game && typeof d.game.amount === "number") {
+        pots.push({
+          id: `game-${gameCode}`,
+          scope: "GAME",
+          gameCode,
+          tier: null,
+          currentAmount: d.game.amount,
+        });
+      }
+      const locals = d.locals ?? {};
+      for (const tier of ["bronze", "silver", "gold"]) {
+        const amount = Number(locals[tier] ?? 0);
+        // LOCAL pots only exist once seeded for this kiosk — skip zeros so
+        // the bar doesn't render three empty tier cards.
+        if (amount > 0) {
+          pots.push({
+            id: `${tier}-${kioskCode}`,
+            scope: "LOCAL",
+            gameCode,
+            tier: tier.toUpperCase(),
+            currentAmount: amount,
+          });
+        }
+      }
+      return pots;
     },
 
     async verifyTicket(idOrCode) {

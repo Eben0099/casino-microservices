@@ -1,8 +1,9 @@
 /**
- * Maps the agd-casino-service `GET /jackpots/by-kiosk/:code` payload
- * (`pots: [{ id, scope, gameCode, tier, currentAmount }]`) into the card
- * shape `<JackpotsBar>` consumes (`{ id, scope, tier, current_amount,
- * game_id }`).
+ * Maps the pot entries returned by `listJackpotsForKiosk`
+ * (`[{ id, scope, gameCode, tier, currentAmount }]`, normalised by the AGD
+ * adapter from the engine display proxy `GET /jackpots?gameCode&kioskCode`)
+ * into the card shape `<JackpotsBar>` consumes (`{ id, scope, tier,
+ * current_amount, game_id }`).
  *
  * Keeps the network-wide GLOBAL pot plus the pots of the requested game
  * (`gameCode`); pots of other games are filtered out so the roulette bar

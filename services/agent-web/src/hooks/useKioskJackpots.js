@@ -61,9 +61,9 @@ export const useKioskJackpots = (kioskCode) => {
     try {
       setError(null);
       if (IS_AGD) {
-        // AGD: read the unified pots from agd-casino-service (game-agnostic
-        // endpoint), keep GLOBAL + roulette pots.
-        const pots = await getAdapter().listJackpotsForKiosk(kioskCode);
+        // AGD: read the live pots proxied from the standalone jackpot
+        // engine via agd-casino-service, keep GLOBAL + roulette pots.
+        const pots = await getAdapter().listJackpotsForKiosk(kioskCode, AGD_GAME_CODE);
         if (!aliveRef.current) return;
         setPots(agdPotsToCards(pots, AGD_GAME_CODE, ROULETTE_GAME_LABEL));
         return;

@@ -106,9 +106,9 @@ export const useKenoJackpots = (kioskCode) => {
     try {
       setError(null);
       if (IS_AGD) {
-        // AGD: read the unified pots from agd-casino-service (game-agnostic
-        // endpoint), keep GLOBAL + keno pots.
-        const pots = await getAdapter().listJackpotsForKiosk(kioskCode);
+        // AGD: read the live pots proxied from the standalone jackpot
+        // engine via agd-casino-service, keep GLOBAL + keno pots.
+        const pots = await getAdapter().listJackpotsForKiosk(kioskCode, AGD_KENO_GAME_CODE);
         if (!aliveRef.current) return;
         setPots(agdPotsToCards(pots, AGD_KENO_GAME_CODE, KENO_GAME_LABEL));
         return;
