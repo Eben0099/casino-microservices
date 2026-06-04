@@ -50,6 +50,14 @@ app = FastAPI(
 
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "CleSuperSecreteBackoffice2026")
 
+# --- Debug tirage -----------------------------------------------------------
+# Les 20 numéros sont désormais générés au début de l'IDLE (avant la première
+# vente) : logués à la génération et servis par GET /admin/debug/draw (clé
+# admin). Ils restent privés (jamais dans welcome/phase_changed/current-round)
+# jusqu'à la phase draw — draw_locked reste le moment de révélation publique.
+# ENGINE_DEBUG_LOG_DRAWS=0 coupe le log console (l'endpoint reste).
+DEBUG_LOG_DRAWS = os.getenv("ENGINE_DEBUG_LOG_DRAWS", "1") == "1"
+
 # Number of synthetic history entries to seed Redis on first boot
 INITIAL_HISTORY_SEED_COUNT = 50
 
@@ -84,6 +92,10 @@ pending_hits: list[dict] = []
 # Latest StatsSnapshot (BACKEND.md §3) — served immediately in welcome so
 # the dashboard is never blank on reconnect.
 current_stats: dict | None = None
+
+# Snapshot du tirage courant côté génération — servi UNIQUEMENT par
+# /admin/debug/draw (clé admin). Jamais broadcasté avant la phase draw.
+current_debug_draw: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +342,7 @@ async def _set_phase(
 # ---------------------------------------------------------------------------
 
 async def game_loop() -> None:
-    global current_draw_id, current_stats
+    global current_draw_id, current_stats, current_debug_draw
     print("[keno] Game loop started — VOLKENO protocol active")
 
     # ---- Load / seed history from Redis ------------------------------------
@@ -412,6 +424,27 @@ async def game_loop() -> None:
             draw_id = current_draw_id
             print(f"[keno] IDLE  draw_id={draw_id} ({t_idle}s)")
 
+            # Génération ANTICIPÉE du tirage (avant l'ouverture des ventes).
+            # draw_numbers(seed, draw_id) est déterministe, donc fixer le seed
+            # ici fixe les 20 numéros pour tout le round. Ils restent privés
+            # (variables locales + current_debug_draw) jusqu'à la phase draw —
+            # rien ne part sur le WS/REST public avant draw_locked.
+            server_seed = secrets.token_hex(16)
+            server_seed_hash = hashlib.sha256(server_seed.encode("utf-8")).hexdigest()
+            numbers = draw_numbers(server_seed, draw_id)   # reveal order
+            current_debug_draw = {
+                "draw_id": draw_id,
+                "numbers": numbers,
+                "server_seed_hash": server_seed_hash,
+                "generated_at": _now_ms(),
+            }
+            if DEBUG_LOG_DRAWS:
+                print(
+                    f"🔍 [keno][GENERATED] draw_id={draw_id} numbers={numbers} "
+                    f"(seed_hash={server_seed_hash[:16]}…)",
+                    flush=True,
+                )
+
             await _set_phase("idle", draw_id, int(t_idle * 1000))
 
             # Flush any jackpot hits that landed during the previous draw/results
@@ -447,9 +480,8 @@ async def game_loop() -> None:
             # =================================================================
             print(f"[keno] DRAW  draw_id={draw_id} ({t_draw}s)")
 
-            server_seed = secrets.token_hex(16)
-            server_seed_hash = hashlib.sha256(server_seed.encode("utf-8")).hexdigest()
-            numbers = draw_numbers(server_seed, draw_id)   # reveal order
+            # server_seed / numbers générés au début de l'idle (voir bloc
+            # "Génération ANTICIPÉE") — ici on ne fait que les révéler.
             locked_at = _now_ms()
 
             # 1. phase_changed(draw) FIRST
@@ -763,6 +795,19 @@ async def verify_round(round_id: int) -> dict:
 # ---------------------------------------------------------------------------
 # Admin REST endpoints
 # ---------------------------------------------------------------------------
+
+@app.get("/admin/debug/draw", dependencies=[Depends(verify_admin_key)])
+async def admin_debug_draw() -> dict:
+    """Tirage du round COURANT tel que généré (debug / vérification de match).
+
+    Révèle les 20 numéros dès le début de l'idle, avant la première vente —
+    protégé par la clé admin, à n'utiliser que pour le débogage. Compare avec
+    draw_locked / GET /verify/:round_id.
+    """
+    if current_debug_draw is None:
+        raise HTTPException(status_code=404, detail="Aucun tirage généré (moteur en démarrage ?)")
+    return {**current_debug_draw, "phase": current_phase_state["phase"]}
+
 
 @app.get("/admin/settings", dependencies=[Depends(verify_admin_key)])
 async def admin_get_settings() -> dict:
