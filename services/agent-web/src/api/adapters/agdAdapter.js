@@ -82,6 +82,12 @@ function normalizeTicket(t) {
       payout,
       is_winning: isWinning,
       result: b.result ?? (payout > 0 ? "won" : "lost"),
+      // Computed by agd-casino-service from the settlement payout tables:
+      // odds = max total-return multiplier (x36 straight, keno best line),
+      // potential_payout = amount x odds. 0 when the API predates the field —
+      // TicketReceipt falls back to its local catalogue.
+      odds: Number(b.odds ?? 0),
+      potential_payout: Number(b.potentialPayout ?? 0),
     };
   });
   const winningRaw = t.winningNumber ?? null;
@@ -97,6 +103,8 @@ function normalizeTicket(t) {
     winning_number: winningNumber,
     total_wager: Number(t.totalWager ?? 0),
     total_payout: Number(t.totalPayout ?? 0),
+    // Σ potential_payout of non-VOID bets, served by the API (0 = absent).
+    max_payout: Number(t.maxPayout ?? 0),
     bets,
     mode: ADAPTER_MODES.AGD,
     raw: t,

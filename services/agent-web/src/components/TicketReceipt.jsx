@@ -6,7 +6,32 @@ import { useT } from '../i18n';
 const BET_MULTIPLIERS = {
   STRAIGHT: 36, SPLIT: 18, STREET: 12, CORNER: 9,
   SIX_LINE: 6, SECTOR: 6, HALF_COLOR: 4,
-  COLUMN: 3, DOZEN: 3, COLOR: 2, EVEN_ODD: 2, HALF: 2
+  COLUMN: 3, DOZEN: 3, COLOR: 2, EVEN_ODD: 2, HALF: 2,
+  LINES: 2, MIRROR: 18,
+};
+
+// Max keno multiplier per spots count (1..11) — the all-match line of the
+// paytable (cf. KenoGrid KENO_PAYTABLE, same generated source). Display-only
+// fallback when the API doesn't serve bet.odds.
+const KENO_MAX_MULTIPLIER = [
+  0, 2.74, 5.03, 22.4, 99, 450, 1600, 5000, 15000, 40000, 100000, 500000,
+];
+
+/**
+ * Cote affichee pour un pari : la cote servie par l'API (calculee depuis les
+ * tables de reglement) prime ; sinon catalogue local roulette, ou meilleure
+ * ligne keno selon le nombre de numeros coches. 0 = inconnue (pas affichee).
+ */
+const betMultiplier = (bet) => {
+  const apiOdds = Number(bet.odds ?? 0);
+  if (apiOdds > 0) return apiOdds;
+  if (bet.bet_type === 'KENO') {
+    const spots = String(bet.bet_target || '')
+      .split(',')
+      .filter((s) => s.trim() !== '').length;
+    return KENO_MAX_MULTIPLIER[spots] || 0;
+  }
+  return BET_MULTIPLIERS[bet.bet_type] || 0;
 };
 
 const RED_NUMBERS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
@@ -32,7 +57,7 @@ const SIBLING_STATUS_FG = {
   CANCELLED:'#b91c1c',
 };
 
-const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain = false, onSelectSibling }) => {
+const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain = true, onSelectSibling }) => {
   const { t, fmtN, locale } = useT();
 
   const getTargetLabel = (type, target) => {
@@ -61,10 +86,15 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
   const isLost = ticket.status === 'LOST';
   const createdAt = ticket.created_at ? new Date(ticket.created_at) : null;
 
-  const maxGain = ticket.bets.reduce((acc, b) => {
-    const mult = BET_MULTIPLIERS[b.bet_type] || 1;
-    return acc + (b.amount * mult);
-  }, 0);
+  // Max payout servi par l'API (somme des amount x odds des bets non-VOID) ;
+  // fallback local pour les tickets standalone / reponses anterieures au champ.
+  const maxGain = Number(ticket.max_payout) > 0
+    ? Number(ticket.max_payout)
+    : ticket.bets.reduce((acc, b) => {
+        const potential = Number(b.potential_payout ?? 0);
+        if (potential > 0) return acc + potential;
+        return acc + Math.floor(b.amount * betMultiplier(b));
+      }, 0);
 
   const handlePrint = () => window.print();
 
@@ -273,7 +303,7 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
             {ticket.bets.map((bet, idx) => {
               const label = t(`bet.typeShort.${bet.bet_type}`);
               const target = getTargetLabel(bet.bet_type, bet.bet_target);
-              const mult = BET_MULTIPLIERS[bet.bet_type] || 1;
+              const mult = betMultiplier(bet);
               return (
                 <div key={idx} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -293,7 +323,9 @@ const TicketReceipt = ({ ticket, onClose, onPayout, payoutLoading, showMaxGain =
                         </span>
                       )}
                       <span style={{ fontSize: '13px', fontWeight: '600' }}>{label}</span>
-                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>x{mult}</span>
+                      {mult > 0 && (
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>x{fmtN(mult)}</span>
+                      )}
                     </div>
                     <div style={{ fontSize: '11px', color: '#64748b', marginTop: '1px', marginLeft: isResolved ? '22px' : 0 }}>
                       {target}
