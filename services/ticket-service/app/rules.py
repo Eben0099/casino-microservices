@@ -16,7 +16,27 @@ SECTORS = {
     "F": {"7", "28", "12", "35", "3", "26"},
 }
 
+# Cash denomination: every payout is floored to a multiple of this so a cashier
+# never owes an unpayable sum. Floor → house-favorable. Mirror of the AGD
+# casino-service payout-denomination.ts (both engines round identically).
+PAYOUT_DENOMINATION = 50
+
+
+def _round_down_to_denomination(amount: int, denomination: int = PAYOUT_DENOMINATION) -> int:
+    """Floor a payout to the nearest lower multiple of `denomination`."""
+    if amount <= 0:
+        return 0
+    return (amount // denomination) * denomination
+
+
 def calculate_payout(bet_type: str, bet_target: str, amount: int, winning_number: str) -> int:
+    """Payout for one bet line, floored to a payable 50 XAF denomination."""
+    return _round_down_to_denomination(
+        _calculate_payout_raw(bet_type, bet_target, amount, winning_number)
+    )
+
+
+def _calculate_payout_raw(bet_type: str, bet_target: str, amount: int, winning_number: str) -> int:
     """
     Calcule le gain pour une ligne de pari spécifique selon les règles de la roulette européenne.
     """

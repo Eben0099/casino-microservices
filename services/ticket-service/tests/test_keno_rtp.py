@@ -66,11 +66,13 @@ def test_prize_curve_is_monotonic_and_consolation_sane():
             assert v1 >= v0, f"spots={k}: payout drops from {m0}->{m1} ({v0} -> {v1})"
 
 
-def test_payout_floors_fractional_multipliers():
-    # 1 spot pays 2.74x; a 1000 stake that matches its single number -> 2740.
-    assert calculate_keno_payout("7", [7], 1000) == 2740
-    # Fractional result floors (house-favorable): 2.74 * 100 = 274.0 -> 274.
-    assert calculate_keno_payout("7", [7], 100) == 274
+def test_payout_floors_to_50_denomination():
+    # 1 spot pays 2.74x; payouts are floored to a payable 50 XAF denomination
+    # (house-favorable) so a cashier never owes an unpayable sum.
+    # 2.74 * 1000 = 2740 -> floor to 50 -> 2700.
+    assert calculate_keno_payout("7", [7], 1000) == 2700
+    # 2.74 * 100 = 274 -> floor to 50 -> 250.
+    assert calculate_keno_payout("7", [7], 100) == 250
     # A miss pays 0 for low spots (no consolation tier).
     assert calculate_keno_payout("7", [80], 1000) == 0
 
