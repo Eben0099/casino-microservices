@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+# Cash denomination: every payout is floored to a multiple of this (see
+# calculate_keno_payout). Mirror of rules.py / AGD payout-denomination.ts.
+PAYOUT_DENOMINATION = 50
+
 # ---------------------------------------------------------------------------
 # Paytable: KENO_PAYTABLE[spots][matches] = multiplier applied to bet amount.
 # Spots 1..11, matches 0..spots. Missing entries are 0-multiplier (loss).
@@ -76,10 +80,15 @@ def calculate_keno_payout(bet_target: str, drawn_numbers: list[int], amount: int
     matches = len(set(picks) & drawn_set)
 
     multiplier = KENO_PAYTABLE.get(spots, {}).get(matches, 0)
-    # Multipliers can be fractional (low spot counts). Floor the payout to a
-    # whole XAF — truncation is house-favorable and keeps net margin >= target.
-    # Decimal avoids binary-float drift (e.g. 0.81 * amount).
-    return int(Decimal(amount) * Decimal(str(multiplier)))
+    # Multipliers can be fractional (low spot counts). Decimal avoids binary
+    # float drift (e.g. 0.81 * amount). The exact payout is then floored to a
+    # payable 50 XAF denomination so a cashier never owes an unpayable sum
+    # (e.g. 1 515 F) — house-favorable, keeps net margin >= target. Mirrors the
+    # AGD casino-service payout-denomination rounding (both engines agree).
+    exact = int(Decimal(amount) * Decimal(str(multiplier)))
+    if exact <= 0:
+        return 0
+    return (exact // PAYOUT_DENOMINATION) * PAYOUT_DENOMINATION
 
 
 def keno_medal_tier(spots: int, matches: int) -> str | None:
