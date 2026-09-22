@@ -1,6 +1,14 @@
 # AGDTech Casino Backend
 
-Multi-game casino platform (European **roulette** + **Keno/VOLKENO** in production, more games coming) built on a FastAPI + Postgres + Redis microservices architecture, behind a Traefik gateway. Two React web clients are bundled (agent POS + admin backoffice). Display clients (Unity / Next.js) connect to each game engine over WebSocket for real-time play. A dedicated `jackpot-service` is the single source of truth for all jackpots across every game.
+A production multi-game casino platform (European roulette + Keno/VOLKENO, more games in progress) running on a **7-service FastAPI/Postgres/Redis architecture** behind a Traefik gateway, with two bundled React clients (agent POS + admin backoffice) and real-time WebSocket play for Unity/Next.js display clients.
+
+**What's interesting here:**
+- **Provably-fair RNG** — every round's `server_seed` is HMAC-derived and published for player-side verification after the fact.
+- **Dual deployment mode on one codebase** — the same engine runs `standalone` (Unity kiosk loop) or `integrated-agd` (on-demand, wired into the AGD Techbet platform) via a single env var, no fork.
+- **Unified jackpot engine** — one `jackpot-service` owns every pot (GLOBAL/GAME/LOCAL tiers) across all games, with synchronous at-sale contribution and fail-open design so an outage never blocks a bet.
+- **Real-time admin console** — the same WebSocket that feeds the game display also relays live sales/payout/jackpot events to the backoffice, no polling.
+
+**Stack:** FastAPI · PostgreSQL · Redis · Traefik · React 18/Vite · WebSocket · Docker Compose · Alembic
 
 ---
 
@@ -93,8 +101,8 @@ See **`docs/DEPLOYMENT_MODES.md`** for the operational guide (network topology, 
 ### Start
 
 ```bash
-git clone https://github.com/agdtechbet/casino-backend.git
-cd casino-backend
+git clone https://github.com/Eben0099/casino-microservices.git
+cd casino-microservices
 docker compose up -d --build
 ```
 
@@ -154,7 +162,7 @@ Algo: HS256, secret from `JWT_SECRET` env var, `sub` = `agent_id` (UUID).
 Used for `/admin/*` endpoints (CRUD agents, global stats, history, ...).
 
 - Header: `X-API-Key: <ADMIN_API_KEY>`
-- Default key (replace in production): `CleSuperSecreteBackoffice2026`
+- Value comes from the `ADMIN_API_KEY` env var — no default is committed; set your own in `.env` (see `.env.example`).
 
 > The roulette engine **does not protect any endpoint with JWT** — only admin endpoints (`/admin/history`) are key-guarded. The WebSocket is public (read-only stream).
 
@@ -814,13 +822,13 @@ Defined in `docker-compose.yml`. **Override in production via ECS secrets / .env
 
 | Variable | Service | Default | Description |
 |---|---|---|---|
-| `JWT_SECRET` | agent, ticket | `MonSuperSecretCasino2026!NePasPartager` | JWT signing key |
-| `ADMIN_API_KEY` | agent, ticket, roulette | `CleSuperSecreteBackoffice2026` | Admin key for `/admin/*` |
+| `JWT_SECRET` | agent, ticket | *(none committed — set in `.env`)* | JWT signing key |
+| `ADMIN_API_KEY` | agent, ticket, roulette | *(none committed — set in `.env`)* | Admin key for `/admin/*` |
 | `REDIS_URL` | ticket, roulette, display | `redis://casino_redis:6379/0` | Redis URL |
 | `DATABASE_URL` | roulette | `postgresql+asyncpg://...` | Async Postgres DSN |
 | `ROOT_PATH` | agent, ticket, roulette | `/api/agents` etc. | Traefik prefix (so Swagger works) |
 
-> Postgres credentials (`casino_admin` / `super_secret_password`) are in clear text in `docker-compose.yml`. **Move them to secrets for production.**
+> Postgres credentials are read from `.env` (see `.env.example`) — never commit real values to `docker-compose.yml`. `docker-compose.prod.yml` already sources every secret from the environment; local/dev compose files should do the same.
 
 ---
 
