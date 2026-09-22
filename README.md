@@ -4,7 +4,7 @@ A production multi-game casino platform (European roulette + Keno/VOLKENO, more 
 
 **What's interesting here:**
 - **Provably-fair RNG** — every round's `server_seed` is HMAC-derived and published for player-side verification after the fact.
-- **Dual deployment mode on one codebase** — the same engine runs `standalone` (Unity kiosk loop) or `integrated-agd` (on-demand, wired into the AGD Techbet platform) via a single env var, no fork.
+- **Dual deployment mode on one codebase** — the same engine runs `standalone` (Unity kiosk loop) or `integrated-agd` (on-demand, wired into an external partner platform) via a single env var, no fork.
 - **Unified jackpot engine** — one `jackpot-service` owns every pot (GLOBAL/GAME/LOCAL tiers) across all games, with synchronous at-sale contribution and fail-open design so an outage never blocks a bet.
 - **Real-time admin console** — the same WebSocket that feeds the game display also relays live sales/payout/jackpot events to the backoffice, no polling.
 
@@ -14,12 +14,12 @@ A production multi-game casino platform (European roulette + Keno/VOLKENO, more 
 
 ## Two deployment modes — both permanent, both production
 
-Since the AGD Techbet integration (Phase 5+ of the casino integration plan), this codebase ships in **two parallel modes that are kept in sync but never merged**:
+This codebase ships in **two parallel modes that are kept in sync but never merged**:
 
 | Mode               | Game engine state      | POS                       | Wallet / Auth                          | Use case                                                                          |
 |--------------------|------------------------|---------------------------|----------------------------------------|-----------------------------------------------------------------------------------|
-| **standalone**     | `cyclic` (Unity loop)  | agent-web mode `standalone` against `ticket-service` | `agent-service` JWT + caisses          | Local kiosks: Unity table + cashier POS, no AGD platform.                          |
-| **integrated-agd** | `on_demand` (per-call) | agent-web mode `agd` against `agd-casino-service` | `agd-auth` JWT + `agd-wallet-service`  | AGD-integrated venues : POS embedded in `agd_terminal_web_app`, balance comes from the player's AGD wallet. |
+| **standalone**     | `cyclic` (Unity loop)  | agent-web mode `standalone` against `ticket-service` | `agent-service` JWT + caisses          | Local kiosks: Unity table + cashier POS, no external platform.                          |
+| **integrated-agd** | `on_demand` (per-call) | agent-web mode `agd` against `agd-casino-service` | `agd-auth` JWT + `agd-wallet-service`  | Externally-integrated venues: POS embedded in `agd_terminal_web_app`, balance comes from the player's wallet on the partner platform. |
 
 The **Python engine** (`game-roulette-service`) is **shared** — it exposes two surfaces depending on the `ENGINE_MODE` env var :
 
@@ -31,7 +31,7 @@ The **agent-web** POS uses a build-time flag (`VITE_INTEGRATION_MODE=standalone|
 **Pick a mode :**
 
 - Run `docker compose up -d` (the default `docker-compose.yml`) for the historical product : Unity + agent POS + ticket-service + agent-service + backoffice + engine `cyclic`.
-- Run `docker compose -f docker-compose.integrated-agd.yml up -d` for the integrated product : engine `on_demand` only. The AGD platform must run in parallel — see `../AGD Techbet/agd-casino-service`.
+- Run `docker compose -f docker-compose.integrated-agd.yml up -d` for the integrated product : engine `on_demand` only. The external partner platform (its `agd-casino-service`) must run in parallel on the shared Docker network.
 
 See **`docs/DEPLOYMENT_MODES.md`** for the operational guide (network topology, env per mode, scaling, runbook).
 
@@ -544,7 +544,7 @@ ws.onmessage = (e) => {
 
 ## Jackpots integration (Unity)
 
-Each kiosk has a short 4-character public code (`kiosk_code`) — printed on the physical machine and stored once in the Unity client config (e.g. `AGDTech.config: kiosk_code = "7H3X"`). All jackpot data is fetched with that single key, via **two public REST endpoints**. No authentication is required: these endpoints expose only public-safe data (no PINs, no balances, no JWTs).
+Each kiosk has a short 4-character public code (`kiosk_code`) — printed on the physical machine and stored once in the Unity client config (e.g. `kiosk.config: kiosk_code = "7H3X"`). All jackpot data is fetched with that single key, via **two public REST endpoints**. No authentication is required: these endpoints expose only public-safe data (no PINs, no balances, no JWTs).
 
 ### Endpoint 1 — Bootstrap : resolve the kiosk
 
