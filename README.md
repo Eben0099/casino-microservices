@@ -1,4 +1,4 @@
-# AGDTech Casino Backend
+# Casino Microservices
 
 A production multi-game casino platform (European roulette + Keno/VOLKENO, more games in progress) running on a **7-service FastAPI/Postgres/Redis architecture** behind a Traefik gateway, with two bundled React clients (agent POS + admin backoffice) and real-time WebSocket play for Unity/Next.js display clients.
 
@@ -889,4 +889,4 @@ docker compose exec ticket-service alembic upgrade head
 
 ## License
 
-Proprietary — AGDTech Bet. All rights reserved.
+Proprietary — Ebenezer Tela. All rights reserved.
